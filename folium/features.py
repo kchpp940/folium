@@ -29,6 +29,7 @@ from branca.element import (
 )
 from branca.utilities import color_brewer
 
+from folium import _geojson_utils
 from folium.elements import JSCSSMixin
 from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
@@ -720,7 +721,7 @@ class GeoJson(Layer):
                     "style_function and highlight_function require "
                     "`embed=True` because the data needs to be processed."
                 )
-            self._to_feature_collection()
+            _geojson_utils.to_feature_collection(self.data)
             if style_function is not None:
                 self._validate_function(style_function, "style_function")
                 self.style_function = style_function
@@ -729,7 +730,9 @@ class GeoJson(Layer):
                 self._validate_function(highlight_function, "highlight_function")
                 self.highlight_function = highlight_function
                 self.highlight_map: dict = {}
-            self.feature_identifier = self._resolve_feature_identifier()
+            self.feature_identifier = _geojson_utils.resolve_feature_identifier(
+                self.data
+            )
 
         if isinstance(tooltip, (GeoJsonTooltip, Tooltip)):
             self.add_child(tooltip)
@@ -769,133 +772,6 @@ class GeoJson(Layer):
     def get_geojson_from_web(self, url: str) -> dict:
         return requests.get(url).json()
 
-    def _ensure_properties(self) -> None:
-        """Ensure every feature has a non-None ``properties`` dict.
-
-        This is the lightest normalization step: it never changes the
-        top-level data type, never converts geometries to features, and
-        never assigns ids. It works on:
-
-        * ``FeatureCollection``: every feature is inspected.
-        * Single ``Feature``: its own properties are inspected.
-        * Raw ``Geometry`` or ``GeometryCollection``: left untouched.
-
-        Operates only on the internal deep copy; the caller's original
-        data is never modified.
-        """
-        data = self.data
-        data_type = data.get("type")
-
-        if data_type == "FeatureCollection":
-            for feat in data["features"]:
-                if "properties" not in feat or feat["properties"] is None:
-                    feat["properties"] = {}
-        elif data_type == "Feature":
-            if "properties" not in data or data["properties"] is None:
-                data["properties"] = {}
-
-    def _to_feature_collection(self) -> None:
-        """Convert a single Feature or raw Geometry to FeatureCollection.
-
-        Automatically ensures properties are normalized before converting.
-        Must only be called when a FeatureCollection is actually required
-        (e.g. style/highlight processing, tooltip/popup rendering, which
-        iterate over ``data["features"]``).
-
-        After this method ``self.data`` is guaranteed to be a
-        ``FeatureCollection`` with normalized properties on every feature.
-        """
-        self._ensure_properties()
-
-        data = self.data
-        data_type = data.get("type")
-
-        if data_type == "FeatureCollection":
-            return
-
-        if data_type == "Feature":
-            self.data = {"type": "FeatureCollection", "features": [data]}
-        else:
-            self.data = {
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                        "type": "Feature",
-                        "geometry": data,
-                        "properties": {},
-                    }
-                ],
-            }
-
-    def _assign_unique_ids(self) -> None:
-        """Assign unique internal ids to every feature.
-
-        When this method is called (because at least one feature lacks a
-        valid unique id), **all** features receive a fresh synthetic id
-        so the mapping is fully deterministic and stable. Internal ids
-        are stringified integers starting from ``"0"``.
-
-        Assumes :meth:`_ensure_properties` and :meth:`_to_feature_collection`
-        have already been called so that ``self.data`` is a
-        ``FeatureCollection``. This method is idempotent.
-        """
-        feats = self.data["features"]
-        if not feats:
-            return
-
-        for idx, feat in enumerate(feats):
-            feat["id"] = str(idx)
-
-    def _resolve_feature_identifier(self) -> str:
-        """Choose the most appropriate Javascript identifier expression.
-
-        Returns, in priority order:
-
-        1. ``"feature.id"`` — when the user supplied valid unique ids
-           on every feature.
-        2. ``"feature.properties.<key>"`` — when a single property key
-           holds unique str/int values on every feature (preferred over
-           generating synthetic ids because it preserves the user's
-           natural identifier).
-        3. ``"feature.id"`` — fallback: synthetic ids are assigned via
-           :meth:`_assign_unique_ids` before returning.
-
-        Assumes :meth:`_ensure_properties` and :meth:`_to_feature_collection`
-        have already been called.
-        """
-        feats = self.data["features"]
-        if not feats:
-            return "feature.id"
-
-        user_supplied_ids = [
-            feat.get("id")
-            for feat in feats
-            if isinstance(feat.get("id"), (str, int))
-        ]
-        if len(user_supplied_ids) == len(feats) and len(set(user_supplied_ids)) == len(feats):
-            return "feature.id"
-
-        first_props = feats[0].get("properties")
-        if isinstance(first_props, dict) and first_props:
-            for key in first_props:
-                values: list = []
-                all_valid = True
-                for feat in feats:
-                    props = feat.get("properties")
-                    if not isinstance(props, dict):
-                        all_valid = False
-                        break
-                    val = props.get(key)
-                    if not isinstance(val, (str, int)):
-                        all_valid = False
-                        break
-                    values.append(val)
-                if all_valid and len(set(values)) == len(feats):
-                    return f"feature.properties.{key}"
-
-        self._assign_unique_ids()
-        return "feature.id"
-
     def convert_to_feature_collection(self) -> None:
         """Convert data into a FeatureCollection if it is not already.
 
@@ -907,8 +783,8 @@ class GeoJson(Layer):
             normalization → FC conversion → id assignment.
         """
         if self.embed:
-            self._to_feature_collection()
-            self._assign_unique_ids()
+            _geojson_utils.to_feature_collection(self.data)
+            _geojson_utils.assign_unique_ids(self.data["features"])
 
     def find_identifier(self) -> str:
         """Find a unique identifier for each feature, create it if needed.
@@ -920,8 +796,8 @@ class GeoJson(Layer):
             pipeline and returns the identifier string.
         """
         if self.embed:
-            self._to_feature_collection()
-        return self._resolve_feature_identifier()
+            return _geojson_utils.resolve_feature_identifier(self.data)
+        return "feature.id"
 
     def _validate_function(self, func: Callable, name: str) -> None:
         """
@@ -966,20 +842,7 @@ class GeoJson(Layer):
             The feature's unique identifier.
         """
         identifier = getattr(self, "feature_identifier", "feature.id")
-        fields = identifier.split(".")[1:]
-        value: Any = feature
-        for field in fields:
-            if isinstance(value, dict):
-                value = value.get(field)
-            else:
-                value = None
-                break
-        assert isinstance(value, (str, int)), (
-            f"Resolved identifier {identifier!r} to non-scalar value "
-            f"{value!r} on feature. This indicates that the data was not "
-            "properly normalized before rendering."
-        )
-        return value
+        return _geojson_utils.get_feature_id(feature, identifier)
 
     def render(self, **kwargs):
         self.parent_map = get_obj_in_upper_tree(self, Map)
@@ -992,57 +855,36 @@ class GeoJson(Layer):
         super().render()
 
 
-TypeStyleMapping = dict[str, Union[str, list[Union[str, int]]]]
-
-
 class GeoJsonStyleMapper:
     """Create dicts that map styling to GeoJson features.
+
+    Thin wrapper around :func:`folium._geojson_utils.build_style_mapping`
+    that keeps the :class:`GeoJson` instance as the MacroElement parent.
 
     :meta private:
     """
 
     def __init__(self, geojson_obj: GeoJson):
         self.geojson_obj = geojson_obj
-        self.data = geojson_obj.data
 
-    def get_style_map(self, style_function: Callable) -> TypeStyleMapping:
+    def get_style_map(self, style_function: Callable) -> _geojson_utils.TypeStyleMapping:
         """Return a dict that maps style parameters to features."""
-        return self._create_mapping(style_function, "style")
+        return _geojson_utils.build_style_mapping(
+            self.geojson_obj.data["features"],
+            self.geojson_obj.feature_identifier,
+            style_function,
+            macro_element_parent=self.geojson_obj,
+        )
 
-    def get_highlight_map(self, highlight_function: Callable) -> TypeStyleMapping:
+    def get_highlight_map(
+        self, highlight_function: Callable
+    ) -> _geojson_utils.TypeStyleMapping:
         """Return a dict that maps highlight parameters to features."""
-        return self._create_mapping(highlight_function, "highlight")
-
-    def _create_mapping(self, func: Callable, switch: str) -> TypeStyleMapping:
-        """Internal function to create the mapping."""
-        mapping: TypeStyleMapping = {}
-        for feature in self.data["features"]:
-            content = func(feature)
-            if switch == "style":
-                for key, value in content.items():
-                    if isinstance(value, MacroElement):
-                        if value._parent is None:
-                            value._parent = self.geojson_obj
-                            value.render()
-                        content[key] = "{{'" + value.get_name() + "'}}"
-            key = self._to_key(content)
-            feature_id = self.geojson_obj.get_feature_id(feature)
-            mapping.setdefault(key, []).append(feature_id)  # type: ignore
-        self._set_default_key(mapping)
-        return mapping
-
-    @staticmethod
-    def _to_key(d: dict) -> str:
-        """Convert dict to str and enable Jinja2 template syntax."""
-        as_str = json.dumps(d, sort_keys=True)
-        return as_str.replace('"{{', "{{").replace('}}"', "}}")
-
-    @staticmethod
-    def _set_default_key(mapping: TypeStyleMapping) -> None:
-        """Replace the field with the most features with a 'default' field."""
-        key_longest = max(mapping, key=mapping.get)  # type: ignore
-        mapping["default"] = key_longest
-        del mapping[key_longest]
+        return _geojson_utils.build_style_mapping(
+            self.geojson_obj.data["features"],
+            self.geojson_obj.feature_identifier,
+            highlight_function,
+        )
 
 
 class TopoJson(JSCSSMixin, Layer):
@@ -1317,7 +1159,7 @@ class GeoJsonDetail(MacroElement):
         figure = self.get_root()
         if isinstance(self._parent, GeoJson):
             if self._parent.embed:
-                self._parent._to_feature_collection()
+                _geojson_utils.to_feature_collection(self._parent.data)
             keys = tuple(
                 self._parent.data["features"][0]["properties"].keys()
                 if self._parent.data["features"]
@@ -1736,7 +1578,7 @@ class Choropleth(FeatureGroup):
             key_on = key_on[8:] if key_on.startswith("feature.") else key_on
 
             def color_scale_fun(x):
-                key_of_x = self._get_by_key(x, key_on)
+                key_of_x = _geojson_utils.get_by_key(x, key_on)
                 if key_of_x is None:
                     raise ValueError(f"key_on `{key_on!r}` not found in GeoJSON.")
 
@@ -1799,17 +1641,13 @@ class Choropleth(FeatureGroup):
 
     @classmethod
     def _get_by_key(cls, obj: Union[dict, list], key: str) -> Union[float, str, None]:
-        key_parts = key.split(".")
-        first_key_part = key_parts[0]
-        if first_key_part.isdigit():
-            value = obj[int(first_key_part)]
-        else:
-            value = obj.get(first_key_part, None)  # type: ignore
-        if len(key_parts) > 1:
-            new_key = ".".join(key_parts[1:])
-            return cls._get_by_key(value, new_key)
-        else:
-            return value
+        """Walk a dotted ``key`` path through a nested dict/list structure.
+
+        Delegates to :func:`folium._geojson_utils.get_by_key` for the
+        actual implementation; kept as a public classmethod for backward
+        compatibility.
+        """
+        return _geojson_utils.get_by_key(obj, key)
 
     def render(self, **kwargs):
         """Render the GeoJson/TopoJson and color scale objects."""
