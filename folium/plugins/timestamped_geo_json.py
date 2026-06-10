@@ -100,15 +100,13 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
             }
 
             var controlOptions = {{ this.options|tojavascript }};
-            controlOptions.formatStrategy = 'moment';
             controlOptions.formatOptions = { dateFormat: "{{this.date_options}}" };
             if (!map._timeDimensionControl) {
                 var {{this._control_name}} = new L.Control.TimeDimensionShared(controlOptions);
                 map.addControl({{this._control_name}});
                 map._timeDimensionControl = {{this._control_name}};
-            } else {
-                map._timeDimensionControl.setFormatStrategy('moment', {dateFormat: "{{this.date_options}}"});
             }
+            map._timeDimensionControl.registerDateFormat("{{this.date_options}}");
 
             var geoJsonLayer = L.geoJson({{this.data}}, {
                     pointToLayer: function (feature, latLng) {

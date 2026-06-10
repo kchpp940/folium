@@ -83,7 +83,7 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
 
             if (!map._timeDimensionControl) {
                 var controlOptions = {{ this.options_control|tojavascript }};
-                controlOptions.formatStrategy = 'moment';
+                controlOptions.formatOptions = { dateFormat: 'YYYY-MM-DD HH:mm:ss' };
                 var {{ this._control_name }} = new L.Control.TimeDimensionShared(controlOptions);
                 map.addControl({{ this._control_name }});
                 map._timeDimensionControl = {{ this._control_name }};

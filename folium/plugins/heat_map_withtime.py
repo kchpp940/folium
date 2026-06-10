@@ -175,14 +175,12 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                     timeSlider: {{this.time_slider}},
                     timeSliderDragUpdate: {{this.time_slider_drag_update}},
                     timeSteps: {{this.index_steps}},
-                    formatStrategy: 'index',
-                    index: {{this.index}}
+                    formatOptions: { dateFormat: 'YYYY-MM-DD HH:mm:ss' }
                 });
                 {{this._control_name}}.addTo(map);
                 map._timeDimensionControl = {{this._control_name}};
-            } else {
-                map._timeDimensionControl.setFormatStrategy('index', {index: {{this.index}}});
             }
+            map._timeDimensionControl.registerIndex(times, {{this.index}});
 
             var {{this.get_name()}} = new TDHeatmap({{this.data}},
                 {heatmapOptions: {
