@@ -172,6 +172,71 @@ def _is_path_like(obj: Any) -> bool:
     return isinstance(obj, PathLike)
 
 
+_SVG_START_RE = re.compile(r"^\s*(<\?xml[^>]*>\s*)?<svg[\s>]", re.IGNORECASE)
+_JSON_START_RE = re.compile(r"^\s*[\{\[]")
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+
+
+def _detect_base64_mime(data: bytes) -> str:
+    """Detect MIME type from base64-decoded bytes using magic numbers."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return "image/gif"
+    if data.startswith(b"BM"):
+        return "image/bmp"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data.startswith(b"%PDF"):
+        return "application/pdf"
+    if data[:2] == b"PK" and data[2:4] in (b"\x03\x04", b"\x05\x06", b"\x07\x08"):
+        return "application/zip"
+    try:
+        text = data.decode("utf-8")
+        if _SVG_START_RE.match(text):
+            return "image/svg+xml"
+        if _JSON_START_RE.match(text):
+            json.loads(text)
+            return "application/json"
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    return "application/octet-stream"
+
+
+def _raw_to_data_uri(raw: str) -> str:
+    """
+    Convert raw content string to an appropriate data URI.
+
+    Detects SVG, JSON, and base64-encoded binary content and wraps them
+    in a proper data URI with the correct MIME type.
+    """
+    stripped = raw.strip()
+
+    if _SVG_START_RE.match(stripped):
+        b64 = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{b64}"
+
+    if _JSON_START_RE.match(stripped):
+        try:
+            json.loads(stripped)
+            b64 = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
+            return f"data:application/json;base64,{b64}"
+        except json.JSONDecodeError:
+            pass
+
+    if len(stripped) >= 4 and len(stripped) % 4 == 0 and _BASE64_RE.match(stripped):
+        try:
+            decoded = base64.b64decode(stripped)
+            mime = _detect_base64_mime(decoded)
+            return f"data:{mime};base64,{stripped}"
+        except Exception:
+            pass
+
+    return raw
+
+
 def _image_source_type(image: Any) -> str:
     """
     Determine the type of an image source.
@@ -247,7 +312,7 @@ def image_to_url(
         url = f"data:image/{fileformat};base64,{b64encoded}"
     else:
         if isinstance(image, str):
-            url = image
+            url = _raw_to_data_uri(image)
         else:
             url = json.dumps(image)
 

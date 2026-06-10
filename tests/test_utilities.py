@@ -1,3 +1,7 @@
+import base64
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -6,11 +10,14 @@ from folium import FeatureGroup, Map, Marker, Popup
 from folium.utilities import (
     JsCode,
     _is_url,
+    _image_source_type,
+    _raw_to_data_uri,
     camelize,
     deep_copy,
     escape_double_quotes,
     get_obj_in_upper_tree,
     if_pandas_df_convert_to_numpy,
+    image_to_url,
     javascript_identifier_path_to_array_notation,
     normalize_bounds_type,
     parse_font_size,
@@ -269,3 +276,142 @@ expected_errors = "The font size must be expressed in rem, em, or px."
 def test_parse_font_size_invalid(value, error_message):
     with pytest.raises(ValueError, match=error_message):
         parse_font_size(value)
+
+
+_SVG_DATA = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    '<circle cx="50" cy="50" r="40" fill="red"/></svg>'
+)
+
+_SVG_DATA_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100"/></svg>'
+)
+
+_JSON_OBJECT = '{"type": "Feature", "properties": {"name": "test"}}'
+_JSON_ARRAY = '[{"type": "Feature"}, {"type": "Feature"}]'
+
+_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+_GIF_BASE64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+
+
+@pytest.mark.parametrize(
+    "image,expected_type",
+    [
+        ("https://example.com/img.png", "url"),
+        ("http://example.com/img.png", "url"),
+        ("ftp://example.com/img.png", "url"),
+        ("file:///tmp/img.png", "url"),
+        ("data:image/png;base64,iVBORw0KGgo=", "url"),
+        (np.array([[[1, 0, 0]]]), "array"),
+        ([[[1, 0, 0]], [[0, 1, 0]]], "array"),
+        (_SVG_DATA, "raw"),
+        (_JSON_OBJECT, "raw"),
+        (_PNG_BASE64, "raw"),
+        ("plain_string", "raw"),
+    ],
+)
+def test_image_source_type(image, expected_type):
+    assert _image_source_type(image) == expected_type
+
+
+def test_image_source_type_pathlike():
+    p = Path("/nonexistent/path.png")
+    assert _image_source_type(p) == "pathlike"
+
+
+def test_image_source_type_existing_file(tmp_path):
+    f = tmp_path / "test.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    assert _image_source_type(str(f)) == "file"
+
+
+@pytest.mark.parametrize(
+    "raw,expected_prefix",
+    [
+        (_SVG_DATA, "data:image/svg+xml;base64,"),
+        (_SVG_DATA_XML, "data:image/svg+xml;base64,"),
+        (_JSON_OBJECT, "data:application/json;base64,"),
+        (_JSON_ARRAY, "data:application/json;base64,"),
+        (_PNG_BASE64, "data:image/png;base64,"),
+        (_GIF_BASE64, "data:image/gif;base64,"),
+    ],
+)
+def test_raw_to_data_uri(raw, expected_prefix):
+    result = _raw_to_data_uri(raw)
+    assert result.startswith(expected_prefix), f"Expected {expected_prefix}, got {result[:60]}"
+    b64part = result.split(",", 1)[1]
+    base64.b64decode(b64part)
+
+
+def test_raw_to_data_uri_plain_text():
+    plain = "hello_world_not_base64"
+    assert _raw_to_data_uri(plain) == plain
+
+
+def test_raw_to_data_uri_invalid_json():
+    not_json = "{not valid json"
+    result = _raw_to_data_uri(not_json)
+    assert not result.startswith("data:application/json;base64,")
+
+
+@pytest.mark.parametrize(
+    "image,check_fn",
+    [
+        (
+            _SVG_DATA,
+            lambda url: url.startswith("data:image/svg+xml;base64,"),
+        ),
+        (
+            _PNG_BASE64,
+            lambda url: url.startswith("data:image/png;base64,"),
+        ),
+        (
+            _JSON_OBJECT,
+            lambda url: url.startswith("data:application/json;base64,"),
+        ),
+        (
+            "https://example.com/img.png",
+            lambda url: url == "https://example.com/img.png",
+        ),
+        (
+            np.array([[[1, 0, 0, 1]]]),
+            lambda url: url.startswith("data:image/png;base64,"),
+        ),
+        (
+            [[[1, 0, 0, 1]], [[0, 1, 0, 1]]],
+            lambda url: url.startswith("data:image/png;base64,"),
+        ),
+    ],
+)
+def test_image_to_url(image, check_fn):
+    result = image_to_url(image)
+    assert check_fn(result), f"Failed for input type {type(image).__name__}"
+
+
+def test_image_to_url_existing_file(tmp_path):
+    f = tmp_path / "test.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    result = image_to_url(str(f))
+    assert result.startswith("data:image/png;base64,")
+
+
+def test_image_to_url_pathlike_existing(tmp_path):
+    f = tmp_path / "test.jpg"
+    f.write_bytes(b"\xff\xd8\xff")
+    result = image_to_url(Path(f))
+    assert result.startswith("data:image/jpg;base64,")
+
+
+def test_image_to_url_data_uri_passthrough():
+    data_uri = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="
+    assert image_to_url(data_uri) == data_uri
+
+
+def test_image_to_url_special_scheme():
+    special = "blob:https://example.com/uuid"
+    assert image_to_url(special) == special
