@@ -42,7 +42,13 @@ from folium.map import (
     Tooltip,
 )
 from folium.raster_layers import TileLayer, WmsTileLayer
-from folium.utilities import JsCode
+from folium.utilities import (
+    EventMixin,
+    JsCode,
+    PREDEFINED_EVENT_ACTIONS,
+    TypeEventHandlers,
+    validate_events,
+)
 from folium.vector_layers import Circle, CircleMarker, Polygon, PolyLine, Rectangle
 
 try:
@@ -75,6 +81,7 @@ __all__ = [
     "Div",
     "DivIcon",
     "Element",
+    "EventMixin",
     "FeatureGroup",
     "Figure",
     "FitBounds",
@@ -96,11 +103,14 @@ __all__ = [
     "Map",
     "Marker",
     "Popup",
+    "PREDEFINED_EVENT_ACTIONS",
     "RegularPolygonMarker",
     "StepColormap",
     "TileLayer",
     "Tooltip",
     "TopoJson",
+    "TypeEventHandlers",
+    "validate_events",
     "Vega",
     "VegaLite",
     "WmsTileLayer",

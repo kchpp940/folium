@@ -9,7 +9,6 @@ import tempfile
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from os import PathLike
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -156,150 +155,6 @@ def if_pandas_df_convert_to_numpy(obj: Any) -> Any:
         return obj
 
 
-def _is_array_like(obj: Any) -> bool:
-    """Check if an object is array-like (numpy ndarray, list, tuple, etc.)."""
-    if "ndarray" in obj.__class__.__name__:
-        return True
-    if isinstance(obj, (list, tuple)):
-        return True
-    if hasattr(obj, "__array__"):
-        return True
-    return False
-
-
-def _is_path_like(obj: Any) -> bool:
-    """Check if an object is path-like (os.PathLike)."""
-    return isinstance(obj, PathLike)
-
-
-_SVG_START_RE = re.compile(r"^\s*(<\?xml[^>]*>\s*)?<svg[\s>]", re.IGNORECASE)
-_BASE64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
-
-_IMAGE_MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"GIF87a", "image/gif"),
-    (b"GIF89a", "image/gif"),
-    (b"BM", "image/bmp"),
-    (b"RIFF", "image/webp"),
-)
-
-
-def _detect_image_mime(data: bytes) -> Optional[str]:
-    """Detect image MIME type from bytes using magic numbers. Returns None if not an image."""
-    for prefix, mime in _IMAGE_MAGIC_PREFIXES:
-        if data.startswith(prefix):
-            if mime == "image/webp" and (len(data) < 12 or data[8:12] != b"WEBP"):
-                continue
-            return mime
-    try:
-        text = data.decode("utf-8")
-        if _SVG_START_RE.match(text):
-            return "image/svg+xml"
-    except UnicodeDecodeError:
-        pass
-    return None
-
-
-def _raw_to_renderable_image_data_uri(raw: str) -> Optional[str]:
-    """
-    Convert raw content string to a renderable image data URI.
-
-    Only handles content that can legitimately be used as an <img> src:
-    - SVG markup → data:image/svg+xml;base64,...
-    - Naked base64-encoded image binary (PNG/JPEG/GIF/etc.) → data:image/*;base64,...
-
-    Returns None if the raw string is not a renderable image.
-    Does NOT wrap JSON or arbitrary text — those are not image sources.
-    """
-    stripped = raw.strip()
-
-    if _SVG_START_RE.match(stripped):
-        b64 = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
-        return f"data:image/svg+xml;base64,{b64}"
-
-    if (
-        len(stripped) >= 4
-        and len(stripped) % 4 == 0
-        and _BASE64_RE.match(stripped)
-    ):
-        try:
-            decoded = base64.b64decode(stripped, validate=True)
-        except Exception:
-            return None
-        mime = _detect_image_mime(decoded)
-        if mime is not None:
-            return f"data:{mime};base64,{stripped}"
-
-    return None
-
-
-def _is_renderable_image_source(image: Any) -> tuple[bool, Optional[str]]:
-    """
-    Check whether an input is a valid renderable image source for image layers.
-
-    Returns (is_valid, reason).
-    Valid renderable sources are: array, pathlike (file must exist), URL,
-    local file string (file must exist), SVG raw string, and naked base64
-    image binary.
-    JSON strings, arbitrary plain text, and nonexistent paths are NOT valid.
-    """
-    src_type = _image_source_type(image)
-
-    if src_type == "array":
-        return True, None
-
-    if src_type == "url":
-        return True, None
-
-    if src_type == "file":
-        return True, None
-
-    if src_type == "pathlike":
-        file_path = os.fspath(image)
-        if os.path.isfile(file_path):
-            return True, None
-        return False, (
-            f"PathLike object points to a nonexistent file: {file_path!r}. "
-            "The file must exist to be used as an image source."
-        )
-
-    if src_type == "raw":
-        assert isinstance(image, str)
-        if _raw_to_renderable_image_data_uri(image) is not None:
-            return True, None
-        return False, (
-            "Raw string is not a renderable image source. "
-            "Expected a URL, path to an existing file, PathLike object, "
-            "SVG markup, base64-encoded image binary, or array-like image data. "
-            "Got a plain string or JSON that cannot be rendered as an image."
-        )
-
-    return False, f"Unsupported image source type: {type(image).__name__}"
-
-
-def _image_source_type(image: Any) -> str:
-    """
-    Determine the type of an image source.
-
-    Returns one of: 'array', 'pathlike', 'url', 'file', 'raw'.
-    """
-    if isinstance(image, str):
-        if _is_url(image):
-            return "url"
-        if os.path.isfile(image):
-            return "file"
-        return "raw"
-
-    if _is_path_like(image):
-        return "pathlike"
-
-    if _is_array_like(image):
-        return "array"
-
-    return "raw"
-
-
 def image_to_url(
     image: Any,
     colormap: Optional[Callable] = None,
@@ -308,25 +163,16 @@ def image_to_url(
     """
     Infers the type of an image argument and transforms it into a URL.
 
-    This function focuses on image source resolution only. For raw strings
-    that are not renderable as images (JSON, plain text, etc.), the
-    original string is returned unchanged — callers that require safe
-    embedding are responsible for escaping at the template injection point,
-    and image-layer entry points (ImageOverlay/FloatImage/CustomIcon)
-    validate renderability and reject non-image sources explicitly.
-
     Parameters
     ----------
-    image: string, PathLike, or array-like object
-        *  If string is a path to an image file and the file exists,
-           its content will be converted and embedded in the output URL.
-        *  If PathLike object, it will be treated as a file path and
-           its content will be converted and embedded in the output URL.
-        *  If string is a URL, it will be linked in the output URL.
-        *  If string is SVG markup or naked base64-encoded image binary,
-           it will be wrapped into a proper image data URI.
-        *  If array-like, it will be converted to PNG base64 string and
+    image: string or array-like object
+        *  If string is a path to an image file, its content will be converted and
            embedded in the output URL.
+        *  If string is a URL, it will be linked in the output URL.
+        *  Otherwise a string will be assumed to be JSON and embedded in the
+           output URL.
+        *  If array-like, it will be converted to PNG base64 string and embedded in the
+           output URL.
     origin: ['upper' | 'lower'], optional, default 'upper'
         Place the [0, 0] index of the array in the upper left or
         lower left corner of the axes.
@@ -337,84 +183,20 @@ def image_to_url(
         0. and 1.  You can use colormaps from `matplotlib.cm`.
 
     """
-    source_type = _image_source_type(image)
-
-    if source_type == "array":
-        img = write_png(image, origin=origin, colormap=colormap)
-        b64encoded = base64.b64encode(img).decode("utf-8")
-        url = f"data:image/png;base64,{b64encoded}"
-    elif source_type == "pathlike":
-        file_path = os.fspath(image)
-        fileformat = os.path.splitext(file_path)[-1][1:]
-        with open(file_path, "rb") as f:
-            img = f.read()
-        b64encoded = base64.b64encode(img).decode("utf-8")
-        url = f"data:image/{fileformat};base64,{b64encoded}"
-    elif source_type == "url":
-        url = image
-    elif source_type == "file":
+    if isinstance(image, str) and not _is_url(image):
         fileformat = os.path.splitext(image)[-1][1:]
         with open(image, "rb") as f:
             img = f.read()
         b64encoded = base64.b64encode(img).decode("utf-8")
         url = f"data:image/{fileformat};base64,{b64encoded}"
+    elif "ndarray" in image.__class__.__name__:
+        img = write_png(image, origin=origin, colormap=colormap)
+        b64encoded = base64.b64encode(img).decode("utf-8")
+        url = f"data:image/png;base64,{b64encoded}"
     else:
-        if isinstance(image, str):
-            renderable = _raw_to_renderable_image_data_uri(image)
-            url = renderable if renderable is not None else image
-        else:
-            url = json.dumps(image)
-
+        # Round-trip to ensure a nice formatted json.
+        url = json.loads(json.dumps(image))
     return url.replace("\n", " ")
-
-
-def image_source_to_url(
-    image: Any,
-    *,
-    require_renderable: bool = True,
-    colormap: Optional[Callable] = None,
-    origin: str = "upper",
-    caller: Optional[str] = None,
-) -> str:
-    """
-    Unified entry point for image layers to convert an image source into a URL.
-
-    Combines renderability validation (optional) and URL conversion into a
-    single call so that callers cannot accidentally skip validation.
-
-    Parameters
-    ----------
-    image: string, PathLike, or array-like object
-        The image source — see image_to_url() for supported image formats.
-    require_renderable: bool, default True
-        When True, raises ValueError if ``image`` is not a source that can
-        be rendered by the browser as an <img> src (e.g. JSON strings,
-        plain text, or nonexistent PathLike objects are rejected).
-        Set to False to bypass the check and match plain image_to_url().
-    colormap: callable or None, default None
-        Forwarded to image_to_url() — only used for array-like mono images.
-    origin: {'upper', 'lower'}, default 'upper'
-        Forwarded to image_to_url().
-    caller: str or None, default None
-        If provided, used as a prefix in ValueError messages so the user
-        can tell which class rejected the input (e.g. "ImageOverlay").
-
-    Returns
-    -------
-    str
-        A URL or data URI suitable for use as an image src.
-
-    Raises
-    ------
-    ValueError
-        If require_renderable is True and the image source is not renderable.
-    """
-    if require_renderable:
-        is_valid, reason = _is_renderable_image_source(image)
-        if not is_valid:
-            prefix = f"{caller} received a non-renderable image source. " if caller else ""
-            raise ValueError(f"{prefix}{reason}")
-    return image_to_url(image, colormap=colormap, origin=origin)
 
 
 def _is_url(url: str) -> bool:
@@ -673,3 +455,298 @@ def parse_font_size(value: Union[str, int, float]) -> str:
     if (value[-3:] != "rem") and (value[-2:] not in ["em", "px"]):
         raise ValueError("The font size must be expressed in rem, em, or px.")
     return value
+
+
+PREDEFINED_EVENT_ACTIONS: dict[str, str] = {
+    "zoom": "function(e) { if (typeof e.target.getBounds === 'function') { map.fitBounds(e.target.getBounds()); } else if (typeof e.target.getLatLng === 'function') { let zoom = map.getZoom(); zoom = zoom > 12 ? zoom : zoom + 1; map.flyTo(e.target.getLatLng(), zoom); } }",
+    "alert": "function(e) { let props = e.target.feature ? e.target.feature.properties : null; let msg = props ? (props.name || props.title || JSON.stringify(props)) : 'Clicked'; alert(msg); }",
+    "log": "function(e) { console.log('Event:', e.type, 'Target:', e.target, 'Event:', e); }",
+    "highlight": "function(e) { if (typeof e.target.setStyle === 'function') { e.target.setStyle({ weight: e.target.options.weight ? e.target.options.weight + 2 : 5, opacity: 1 }); } }",
+    "reset_highlight": "function(e) { if (typeof e.target.resetStyle !== 'undefined' && e.target._map) { e.target._map.eachLayer(function(layer) { if (typeof layer.resetStyle === 'function') { layer.resetStyle(e.target); } }); } else if (typeof e.target.setStyle === 'function' && e.target._originalStyle) { e.target.setStyle(e.target._originalStyle); } }",
+    "open_popup": "function(e) { if (typeof e.target.openPopup === 'function') { e.target.openPopup(); } }",
+    "close_popup": "function(e) { if (typeof e.target.closePopup === 'function') { e.target.closePopup(); } }",
+}
+
+
+class EventHandlerSpec:
+    """
+    Internal: Encapsulates an event handler specification for Leaflet layers.
+    
+    This is used internally by EventMixin to normalize event handler definitions.
+    Users should interact with the `events` parameter instead of this class directly.
+    
+    Supports three types of handlers:
+    1. String function name: e.g., "myGlobalClickHandler"
+    2. Inline JS function body (JsCode or str starting with 'function'): 
+       e.g., JsCode("function(e) { alert('Clicked!'); }")
+    3. Predefined action name: e.g., "zoom", "alert", "log"
+    
+    Parameters
+    ----------
+    handler : str or JsCode
+        The event handler. Can be:
+        - A string referencing a global JS function name
+        - A JsCode object containing an inline function
+        - A string with a predefined action name from PREDEFINED_EVENT_ACTIONS
+        - A string starting with 'function' for inline JS
+    """
+
+    def __init__(self, handler: Union[str, "JsCode", "EventHandlerSpec"]):
+        if isinstance(handler, EventHandlerSpec):
+            self.handler_type: str = handler.handler_type
+            self.raw_handler: Union[str, JsCode] = handler.raw_handler
+            self.resolved_handler: JsCode = handler.resolved_handler
+            return
+
+        if isinstance(handler, JsCode):
+            self.handler_type = "inline"
+            self.raw_handler = handler
+            self.resolved_handler = handler
+            return
+
+        if not isinstance(handler, str):
+            raise TypeError(
+                f"Event handler must be str, JsCode, or EventHandlerSpec, "
+                f"got {type(handler).__name__}"
+            )
+
+        handler_stripped = handler.strip()
+
+        if handler_stripped.startswith("function"):
+            self.handler_type = "inline"
+            self.raw_handler = handler_stripped
+            self.resolved_handler = JsCode(handler_stripped)
+        elif handler_stripped in PREDEFINED_EVENT_ACTIONS:
+            self.handler_type = "predefined"
+            self.raw_handler = handler_stripped
+            self.resolved_handler = JsCode(PREDEFINED_EVENT_ACTIONS[handler_stripped])
+        elif handler_stripped and re.match(
+            r"^[a-zA-Z_$][a-zA-Z0-9_$.]*$", handler_stripped
+        ):
+            self.handler_type = "reference"
+            self.raw_handler = handler_stripped
+            self.resolved_handler = JsCode(handler_stripped)
+        else:
+            self.handler_type = "inline"
+            self.raw_handler = handler_stripped
+            self.resolved_handler = JsCode(handler_stripped)
+
+    def to_javascript(self) -> str:
+        """Return the JavaScript representation of the handler."""
+        return str(self.resolved_handler)
+
+    def __str__(self) -> str:
+        return self.to_javascript()
+
+    def __repr__(self) -> str:
+        return f"EventHandlerSpec(type={self.handler_type!r}, handler={self.raw_handler!r})"
+
+
+TypeEventHandlers = dict[str, Union[str, JsCode, EventHandlerSpec]]
+
+
+class EventMixin:
+    """
+    Mixin class that provides unified event binding capabilities.
+    
+    Add this mixin to any MacroElement subclass to enable event binding
+    through the `events` parameter.
+    
+    Examples
+    --------
+    >>> class MyLayer(EventMixin, MacroElement):
+    ...     def __init__(self, events=None, **kwargs):
+    ...         super().__init__(events=events, **kwargs)
+    >>> 
+    >>> layer = MyLayer(events={
+    ...     "click": "myClickHandler",
+    ...     "mouseover": "function(e) { console.log('over'); }",
+    ...     "mouseout": "log",
+    ... })
+    """
+
+    _supported_events: set[str] = {
+        "click",
+        "dblclick",
+        "mousedown",
+        "mouseup",
+        "mouseover",
+        "mouseout",
+        "mousemove",
+        "contextmenu",
+        "focus",
+        "blur",
+        "preclick",
+        "add",
+        "remove",
+        "popupopen",
+        "popupclose",
+        "tooltipopen",
+        "tooltipclose",
+    }
+
+    def __init__(
+        self,
+        events: Optional[TypeEventHandlers] = None,
+        **kwargs: Any,
+    ) -> None:
+        self._event_handlers: dict[str, EventHandlerSpec] = {}
+        if events:
+            self.set_events(events)
+        super().__init__(**kwargs)
+
+    def set_events(self, events: TypeEventHandlers) -> None:
+        """
+        Set multiple event handlers at once.
+        
+        Parameters
+        ----------
+        events : dict
+            Dictionary mapping event names to handlers.
+            Keys are event names (e.g., 'click', 'mouseover').
+            Values are handlers (str function name, JsCode, or predefined action).
+        """
+        if not isinstance(events, dict):
+            raise TypeError("events must be a dictionary")
+        for event_name, handler in events.items():
+            self.set_event(event_name, handler)
+
+    def set_event(
+        self, event_name: str, handler: Union[str, JsCode, EventHandlerSpec]
+    ) -> None:
+        """
+        Set a single event handler.
+        
+        Parameters
+        ----------
+        event_name : str
+            Name of the event (e.g., 'click', 'mouseover').
+        handler : str, JsCode, or EventHandlerSpec
+            The event handler to bind. Can be:
+            - Global JS function name (str)
+            - Inline function body starting with 'function' (str or JsCode)
+            - Predefined action name: 'zoom', 'alert', 'log', 
+              'highlight', 'reset_highlight', 'open_popup', 'close_popup'
+        """
+        if not isinstance(event_name, str):
+            raise TypeError("event_name must be a string")
+        event_name_lower = event_name.lower()
+        if (
+            event_name != event_name_lower
+            and event_name_lower in self._supported_events
+        ):
+            import warnings
+
+            warnings.warn(
+                f"Event name '{event_name}' should be lowercase, "
+                f"using '{event_name_lower}' instead",
+                UserWarning,
+                stacklevel=2,
+            )
+            event_name = event_name_lower
+        self._event_handlers[event_name] = EventHandlerSpec(handler)
+
+    def get_event(self, event_name: str) -> Optional[EventHandlerSpec]:
+        """Get the handler for a specific event, or None if not set."""
+        return self._event_handlers.get(event_name)
+
+    def remove_event(self, event_name: str) -> bool:
+        """Remove an event handler. Returns True if handler existed."""
+        if event_name in self._event_handlers:
+            del self._event_handlers[event_name]
+            return True
+        return False
+
+    def clear_events(self) -> None:
+        """Remove all event handlers."""
+        self._event_handlers.clear()
+
+    def has_events(self) -> bool:
+        """Check if any event handlers are configured."""
+        return bool(self._event_handlers)
+
+    def _render_event_bindings(self, layer_var_name: str) -> str:
+        """
+        Generate the JavaScript code for binding events.
+        
+        Parameters
+        ----------
+        layer_var_name : str
+            The JavaScript variable name of the Leaflet layer.
+            
+        Returns
+        -------
+        str
+            JavaScript code with .on() calls.
+        """
+        if not self._event_handlers:
+            return ""
+        lines = []
+        for event_name, event_handler in self._event_handlers.items():
+            lines.append(
+                f"{layer_var_name}.on({json.dumps(event_name)}, "
+                f"{event_handler.to_javascript()});"
+            )
+        return "\n".join(lines)
+
+    def _render_on_each_feature_events(self) -> str:
+        """
+        Generate the JavaScript code for binding events inside onEachFeature.
+        
+        This is used by GeoJson to bind events to individual feature layers.
+        
+        Returns
+        -------
+        str
+            JavaScript code for layer.on({...}) object content.
+        """
+        if not self._event_handlers:
+            return ""
+        entries = []
+        for event_name, event_handler in self._event_handlers.items():
+            entries.append(
+                f"    {json.dumps(event_name)}: {event_handler.to_javascript()}"
+            )
+        return ",\n".join(entries)
+
+
+def validate_events(
+    events: Optional[TypeEventHandlers],
+    allowed_events: Optional[set[str]] = None,
+) -> dict[str, EventHandlerSpec]:
+    """
+    Validate and normalize event handlers dictionary.
+    
+    Parameters
+    ----------
+    events : dict or None
+        Dictionary of event handlers.
+    allowed_events : set or None
+        If provided, only allow events in this set.
+        Defaults to all standard Leaflet events.
+        
+    Returns
+    -------
+    dict[str, EventHandlerSpec]
+        Normalized dictionary with EventHandlerSpec instances.
+        
+    Raises
+    ------
+    ValueError
+        If an event name is not in allowed_events.
+    """
+    if events is None:
+        return {}
+    if not isinstance(events, dict):
+        raise TypeError("events must be a dictionary")
+    if allowed_events is None:
+        allowed_events = EventMixin._supported_events
+    result: dict[str, EventHandlerSpec] = {}
+    for event_name, handler in events.items():
+        if event_name not in allowed_events:
+            raise ValueError(
+                f"Unsupported event: '{event_name}'. "
+                f"Supported events: {sorted(allowed_events)}"
+            )
+        result[event_name] = EventHandlerSpec(handler)
+    return result

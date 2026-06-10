@@ -13,9 +13,6 @@ from folium.utilities import (
     TypeBounds,
     TypeBoundsReturn,
     TypeJsonValue,
-    _image_source_type,
-    _is_array_like,
-    image_source_to_url,
     image_to_url,
     mercator_transform,
     normalize_bounds_type,
@@ -329,24 +326,12 @@ class ImageOverlay(Layer):
         self.bounds = bounds
         self.options = remove_empty(**kwargs)
         self.pixelated = pixelated
-
-        source_type = _image_source_type(image)
-
-        if mercator_project and source_type == "array":
+        if mercator_project:
             image = mercator_transform(
                 image, (bounds[0][0], bounds[1][0]), origin=origin
             )
 
-        if source_type != "array":
-            colormap = None
-
-        self.url = image_source_to_url(
-            image,
-            require_renderable=True,
-            colormap=colormap,
-            origin=origin,
-            caller="ImageOverlay",
-        )
+        self.url = image_to_url(image, origin=origin, colormap=colormap)
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """

@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.template import Template
-from folium.utilities import image_source_to_url
 
 
 class FloatImage(MacroElement):
@@ -9,16 +8,9 @@ class FloatImage(MacroElement):
 
     Parameters
     ----------
-    image: str, PathLike, or array-like object
-        The image to display.
-
-        * If string is a path to an image file and the file exists,
-          its content will be converted and embedded.
-        * If PathLike object, it will be treated as a file path and
-          its content will be converted and embedded.
-        * If string is a URL, it will be linked.
-        * Otherwise a string will be assumed to be raw content and embedded.
-        * If array-like, it will be converted to PNG base64 string and embedded.
+    image: str
+        Url to image location. Can also be an inline image using a data URI
+        or a local file using `file://`.
     bottom: int, default 75
         Vertical position from the bottom, as a percentage of screen height.
     left: int, default 75
@@ -45,7 +37,7 @@ class FloatImage(MacroElement):
 
             {% macro html(this,kwargs) %}
             <img id="{{this.get_name()}}" alt="float_image"
-                 src="{{ this.url }}"
+                 src="{{ this.image }}"
                  style="z-index: 999999">
             </img>
             {% endmacro %}
@@ -54,9 +46,7 @@ class FloatImage(MacroElement):
     def __init__(self, image, bottom=75, left=75, **kwargs):
         super().__init__()
         self._name = "FloatImage"
-        self.url = image_source_to_url(
-            image, require_renderable=True, caller="FloatImage"
-        )
+        self.image = image
         self.bottom = bottom
         self.left = left
         self.css = kwargs

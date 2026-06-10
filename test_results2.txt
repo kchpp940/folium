@@ -1,0 +1,146 @@
+Error processing line 1 of /Users/pkcha/.local/lib/python3.13/site-packages/autogluon_common-1.5.1b20260503-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 207, in addpackage
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 810, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
+Error processing line 1 of /Users/pkcha/.local/lib/python3.13/site-packages/autogluon_core-1.5.1b20260503-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 207, in addpackage
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 810, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
+Error processing line 1 of /Users/pkcha/.local/lib/python3.13/site-packages/autogluon_features-1.5.1b20260503-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 207, in addpackage
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 810, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
+Error processing line 1 of /Users/pkcha/.local/lib/python3.13/site-packages/autogluon_tabular-1.5.1b20260503-nspkg.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 207, in addpackage
+    File "<string>", line 1, in <module>
+    File "<frozen importlib._bootstrap>", line 810, in module_from_spec
+  AttributeError: 'NoneType' object has no attribute 'loader'
+
+Remainder of file ignored
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0 -- /opt/miniconda3/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /Users/pkcha/folium
+configfile: pyproject.toml
+plugins: mock-3.15.1, cov-7.1.0, flaky-3.8.1, xdist-3.8.0, timeout-2.4.0, relaxed-2.0.2, typeguard-4.5.1, asyncio-1.3.0, sugar-1.1.1, hypothesis-6.152.2, httpbin-2.1.0, anyio-4.12.1, Faker-40.15.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 99 items
+tile layer
+custom tile subdomains
+wms
+image overlay
+xyzservices[CartoDB DarkMatter]
+xyzservices[tiles1]
+validate location[location0]
+validate location[location1]
+validate location[location2]
+validate location[location3]
+validate location[location4]
+validate location[location5]
+validate location[location6]
+validate location[location7]
+validate location[location8]
+validate location exceptions[None]
+validate location exceptions[location1]
+validate location exceptions[location2]
+validate location exceptions[location3]
+validate location exceptions[location4]
+validate location exceptions[hi]
+validate location exceptions[location6]
+validate location exceptions[Marker]
+validate location exceptions[location8]
+validate location exceptions[location9]
+validate location exceptions[location10]
+validate location exceptions[location11]
+validate location exceptions[location12]
+validate location exceptions[location13]
+validate location exceptions[location14]
+validate locations[locations0]
+validate locations[locations1]
+validate locations[locations2]
+validate locations[locations3]
+validate multi locations[locations0]
+validate locations exceptions[None]
+validate locations exceptions[locations1]
+validate locations exceptions[locations2]
+validate locations exceptions[locations3]
+validate locations exceptions[locations4]
+validate locations exceptions[hi]
+validate locations exceptions[locations6]
+validate locations exceptions[Marker]
+validate locations exceptions[locations8]
+validate locations exceptions[locations9]
+validate locations exceptions[locations10]
+validate locations exceptions[locations11]
+validate locations exceptions[locations12]
+validate locations exceptions[locations13]
+validate locations exceptions[locations14]
+if pandas df convert to numpy
+normalize bounds type[bounds0-expected0]
+normalize bounds type[bounds1-expected1]
+normalize bounds type[bounds2-expected2]
+normalize bounds type[bounds3-expected3]
+normalize bounds type[bounds4-expected4]
+camelize
+deep copy
+get obj in upper tree
+parse options
+is url[https://example.com/img.png]
+is url[http://example.com/img.png]
+is url[ftp://example.com/img.png]
+is url[file:///t.jpg]
+is url[data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7]
+escape double quotes[bla-bla]
+escape double quotes[bla"bla-bla\\"bla]
+escape double quotes["bla"bla"-\\"bla\\"bla\\"]
+javascript identifier path to array notation[bla-["bla"]]
+javascript identifier path to array notation[obj-1.obj2-["obj-1"]["obj2"]]
+javascript identifier path to array notation[obj-1.obj"2-["obj-1"]["obj\\"2"]]
+js code init str
+js code init js code
+parse font size valid[10-10px]
+parse font size valid[12.5-12.5px]
+parse font size valid[1rem-1rem]
+parse font size valid[1em-1em]
+parse font size invalid[1-T]
+parse font size invalid[1unit-h]
+figure creation
+figure rendering
+figure html
+figure double rendering
+marker popups
+divicon
+color line
+vegalite major version[1]
+vegalite major version[2]
+vegalite major version[3]
+vegalite major version[4]
+vegalite major version[5]
+vegalite major version[None]
+geojson tooltip
+geojson marker
+geojson find identifier
+geojson empty features with styling
+geojson event handler
+geometry collection get bounds
+choropleth get by key
+
+============================== 99 passed in 1.01s ==============================

@@ -13,9 +13,11 @@ from branca.element import Element, Figure, Html, MacroElement
 from folium.elements import ElementAddToElement, EventHandler, IncludeStatement
 from folium.template import Template
 from folium.utilities import (
+    EventMixin,
     JsCode,
     TypeBounds,
     TypeBoundsReturn,
+    TypeEventHandlers,
     TypeJsonValue,
     escape_backticks,
     parse_options,
@@ -457,7 +459,7 @@ class Icon(MacroElement):
         )
 
 
-class Marker(MacroElement):
+class Marker(EventMixin, MacroElement):
     """
     Create a simple stock Leaflet marker on the map, with optional
     popup text or Vincent visualization.
@@ -475,6 +477,14 @@ class Marker(MacroElement):
         the Icon plugin to use to render the marker.
     draggable: bool, default False
         Set to True to be able to drag the marker around the map.
+    events: dict, default None
+        Dictionary mapping event names to event handlers.
+        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
+        Values can be:
+        - Global JS function name (str)
+        - Inline function body starting with 'function' (str)
+        - JsCode object with inline function
+        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
 
     Returns
     -------
@@ -497,6 +507,7 @@ class Marker(MacroElement):
                 {{ this.location|tojson }},
                 {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
+            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -524,9 +535,10 @@ class Marker(MacroElement):
         tooltip: Union["Tooltip", str, None] = None,
         icon: Optional[Union[Icon, "CustomIcon", "DivIcon"]] = None,
         draggable: bool = False,
+        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__()
+        super().__init__(events=events)
         self._name = "Marker"
         self.location = validate_location(location) if location is not None else None
         self.options = remove_empty(

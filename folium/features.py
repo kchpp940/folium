@@ -35,9 +35,11 @@ from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
 from folium.template import Template
 from folium.utilities import (
+    EventMixin,
     JsCode,
     TypeBoundsReturn,
     TypeContainer,
+    TypeEventHandlers,
     TypeJsonValue,
     TypeLine,
     TypePathOptions,
@@ -46,7 +48,6 @@ from folium.utilities import (
     escape_backticks,
     get_bounds,
     get_obj_in_upper_tree,
-    image_source_to_url,
     image_to_url,
     javascript_identifier_path_to_array_notation,
     none_max,
@@ -75,6 +76,14 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
         Input text or visualization for object displayed when clicking.
     tooltip: str or folium.Tooltip, optional
         Display a text when hovering over the object.
+    events: dict, default None
+        Dictionary mapping event names to event handlers.
+        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
+        Values can be:
+        - Global JS function name (str)
+        - Inline function body starting with 'function' (str)
+        - JsCode object with inline function
+        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs:
         See vector layers path_options for additional arguments.
 
@@ -88,6 +97,7 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
                 {{ this.location|tojson }},
                 {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
+            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -106,9 +116,12 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
         radius: int = 15,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
+        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(location, popup=popup, tooltip=tooltip)
+        super().__init__(
+            location, popup=popup, tooltip=tooltip, events=events
+        )
         self._name = "RegularPolygonMarker"
         self.options = path_options(line=False, radius=radius, **kwargs)
         self.options.update(
@@ -462,7 +475,7 @@ class VegaLite(MacroElement):
         )
 
 
-class GeoJson(Layer):
+class GeoJson(EventMixin, Layer):
     """
     Creates a GeoJson object for plotting into a Map.
 
@@ -515,6 +528,20 @@ class GeoJson(Layer):
         Javascript code to be called on each feature.
         See https://leafletjs.com/examples/geojson/
         `onEachFeature` for more information.
+    events: dict, default None
+        Dictionary mapping event names to event handlers. These events are
+        bound to **individual feature layers** (via onEachFeature).
+        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
+        Values can be:
+        - Global JS function name (str)
+        - Inline function body starting with 'function' (str)
+        - JsCode object with inline function
+        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
+    layer_events: dict, default None
+        Dictionary mapping event names to event handlers. These events are
+        bound to the **GeoJson layer as a whole** (not individual features).
+        Same format as `events` parameter.
+        Useful for layer-level events like 'layeradd', 'layerremove', etc.
     **kwargs
         Keyword arguments are passed to the geoJson object as extra options.
 
@@ -536,6 +563,22 @@ class GeoJson(Layer):
     ...     )
     ... }
     >>> GeoJson(geojson, style_function=style_function)
+
+    >>> # Bind feature-level click events with predefined action
+    >>> GeoJson(geojson, events={"click": "alert"})
+
+    >>> # Bind both feature-level and layer-level events
+    >>> GeoJson(
+    ...     geojson,
+    ...     events={
+    ...         "click": "function(e) { console.log(e.target.feature); }",
+    ...         "mouseover": "highlight",
+    ...         "mouseout": "reset_highlight",
+    ...     },
+    ...     layer_events={
+    ...         "layeradd": "log",
+    ...     }
+    ... )
 
     See Also
     --------
@@ -635,6 +678,10 @@ class GeoJson(Layer):
                     }
                 }
                 {%- endif %}
+                {%- if this._render_on_each_feature_events() %}
+                ,
+                {{ this._render_on_each_feature_events() }}
+                {%- endif %}
             });
         };
         var {{ this.get_name() }} = L.geoJson(null, {
@@ -666,6 +713,8 @@ class GeoJson(Layer):
         {{this.get_name()}}.setStyle(function(feature) {return feature.properties.style;});
         {%- endif %}
 
+        {% if this.has_layer_events() %}{{ this._render_layer_event_bindings() }}{% endif %}
+
         {% endmacro %}
         """)  # noqa
 
@@ -686,9 +735,17 @@ class GeoJson(Layer):
         zoom_on_click: bool = False,
         on_each_feature: Optional[JsCode] = None,
         marker: Union[Circle, CircleMarker, Marker, None] = None,
+        events: Optional[TypeEventHandlers] = None,
+        layer_events: Optional[TypeEventHandlers] = None,
         **kwargs: Any,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            events=events,
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+        )
         self._name = "GeoJson"
         self.embed = embed
         self.embed_link: Optional[str] = None
@@ -714,6 +771,15 @@ class GeoJson(Layer):
         self.on_each_feature = on_each_feature
         self.options = remove_empty(**kwargs)
 
+        from folium.utilities import EventHandlerSpec
+
+        self._layer_event_handlers: dict[str, EventHandlerSpec] = {}
+        if layer_events:
+            if not isinstance(layer_events, dict):
+                raise TypeError("layer_events must be a dictionary")
+            for event_name, handler in layer_events.items():
+                self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
+
         self.data = self.process_data(data)
 
         if self.style or self.highlight:
@@ -734,6 +800,54 @@ class GeoJson(Layer):
             self.add_child(Tooltip(tooltip))
         if isinstance(popup, (GeoJsonPopup, Popup)):
             self.add_child(popup)
+
+    def set_layer_event(
+        self, event_name: str, handler: Union[str, JsCode, Any]
+    ) -> None:
+        """Set a single layer-level event handler.
+
+        Layer-level events are bound to the GeoJson layer as a whole,
+        not to individual feature layers.
+
+        Parameters
+        ----------
+        event_name : str
+            Name of the event (e.g., 'layeradd', 'layerremove').
+        handler : str, JsCode
+            The event handler to bind. Same format as `events` parameter.
+        """
+        from folium.utilities import EventHandlerSpec
+
+        self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
+
+    def remove_layer_event(self, event_name: str) -> bool:
+        """Remove a layer-level event handler. Returns True if handler existed."""
+        if event_name in self._layer_event_handlers:
+            del self._layer_event_handlers[event_name]
+            return True
+        return False
+
+    def has_layer_events(self) -> bool:
+        """Check if any layer-level event handlers are configured."""
+        return bool(self._layer_event_handlers)
+
+    def clear_layer_events(self) -> None:
+        """Remove all layer-level event handlers."""
+        self._layer_event_handlers.clear()
+
+    def _render_layer_event_bindings(self) -> str:
+        """Generate JavaScript code for binding layer-level events."""
+        if not self._layer_event_handlers:
+            return ""
+        lines = []
+        import json
+
+        for event_name, event_handler in self._layer_event_handlers.items():
+            lines.append(
+                f"{self.get_name()}.on({json.dumps(event_name)}, "
+                f"{event_handler.to_javascript()});"
+            )
+        return "\n".join(lines)
 
     def process_data(self, data: Any) -> dict:
         """Convert an unknown data input into a geojson dictionary."""
@@ -1866,20 +1980,14 @@ class CustomIcon(Icon):
 
     Parameters
     ----------
-    icon_image : string, PathLike, or array-like object
+    icon_image : string or array-like object
         The data to use as an icon.
 
-        * If string is a path to an image file (that exists), its content
-          will be converted and embedded.
-        * If PathLike object, it will be treated as a file path and
-          its content will be converted and embedded (file must exist).
+        * If string is a path to an image file, its content will be converted and
+          embedded.
         * If string is a URL, it will be linked.
-        * If string is SVG markup or naked base64-encoded image binary,
-          it will be wrapped into a proper image data URI.
+        * Otherwise a string will be assumed to be JSON and embedded.
         * If array-like, it will be converted to PNG base64 string and embedded.
-
-        Plain strings, JSON strings, or nonexistent paths are NOT accepted
-        and will raise a ValueError.
     icon_size : tuple of 2 int, optional
         Size of the icon image in pixels.
     icon_anchor : tuple of 2 int, optional
@@ -1920,19 +2028,10 @@ class CustomIcon(Icon):
         super(Icon, self).__init__()
         self._name = "icon"
         self.options = remove_empty(
-            icon_url=image_source_to_url(
-                icon_image, require_renderable=True, caller="CustomIcon"
-            ),
+            icon_url=image_to_url(icon_image),
             icon_size=icon_size,
             icon_anchor=icon_anchor,
-            shadow_url=(
-                shadow_image
-                and image_source_to_url(
-                    shadow_image,
-                    require_renderable=True,
-                    caller="CustomIcon (shadow_image)",
-                )
-            ),
+            shadow_url=shadow_image and image_to_url(shadow_image),
             shadow_size=shadow_size,
             shadow_anchor=shadow_anchor,
             popup_anchor=popup_anchor,
