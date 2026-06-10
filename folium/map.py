@@ -236,17 +236,22 @@ class LayerGroup(Layer):
         self.options = remove_empty(**kwargs)
 
 
-def _walk_controllable_layers(element, result, seen_ids):
+def _walk_controllable_layers(element, result, seen_ids, force_collect_ids=None):
     """
     Core walking logic for collecting controllable Layer objects.
 
     Rules:
-    - If the element IS a Layer with control=True: record it in `result`
-      (deduped by object id via `seen_ids`) and STOP — do NOT descend
-      into its children, because it is a control boundary (its children
-      belong to this group and should not appear as top-level controls).
-    - Otherwise (non-Layer element, or Layer with control=False):
-      descend into its _children to look for nested controllable layers.
+    - If the element IS a Layer that is "collectible" (see below): record it
+      in *result* (deduped by object id via *seen_ids*) and STOP — do NOT
+      descend into its children, because it is a control boundary.
+    - Otherwise: descend into its _children to look for nested layers.
+
+    A Layer is "collectible" when **either**:
+      * ``element.control`` is True (the normal rule), **or**
+      * the element's ``id()`` is in *force_collect_ids* — this lets
+        callers like GroupedLayerControl re-collect layers whose
+        ``control`` flag has already been flipped to False, without
+        needing to temporarily restore the flag.
 
     Arguments
     ---------
@@ -256,9 +261,15 @@ def _walk_controllable_layers(element, result, seen_ids):
         Accumulator dict; modified in place.
     seen_ids : set[int]
         Accumulator set of already-seen Layer object ids; modified in place.
+    force_collect_ids : set[int] or None
+        If provided, Layer objects whose ``id()`` is in this set are
+        treated as if they had ``control=True``, regardless of their
+        actual ``control`` attribute.
     """
-    is_controllable = isinstance(element, Layer) and element.control
-    if is_controllable:
+    is_layer = isinstance(element, Layer)
+    forced = force_collect_ids is not None and id(element) in force_collect_ids
+    is_collectible = is_layer and (forced or element.control)
+    if is_collectible:
         obj_id = id(element)
         if obj_id not in seen_ids:
             seen_ids.add(obj_id)
@@ -274,17 +285,19 @@ def _walk_controllable_layers(element, result, seen_ids):
 
     if hasattr(element, "_children"):
         for child in element._children.values():
-            _walk_controllable_layers(child, result, seen_ids)
+            _walk_controllable_layers(child, result, seen_ids, force_collect_ids)
 
 
-def _collect_from_iterable(iterable):
+def _collect_from_iterable(iterable, force_collect_ids=None):
     """
     Apply the same control-boundary / dedup rules as
     _collect_controllable_layers, but starting from an arbitrary iterable
     of elements (instead of the children of a single parent).
 
-    Used by GroupedLayerControl so it shares identical semantics with
-    the regular LayerControl.
+    When *force_collect_ids* is provided, Layer objects whose ``id()``
+    is in that set are treated as if they had ``control=True``.  This
+    lets GroupedLayerControl re-collect layers it already set to
+    ``control=False`` without any temporary flag flipping.
 
     Returns an OrderedDict with the same structure as
     _collect_controllable_layers.
@@ -294,7 +307,7 @@ def _collect_from_iterable(iterable):
     result: OrderedDict[str, dict] = _OD()
     seen_ids: set[int] = set()
     for item in iterable:
-        _walk_controllable_layers(item, result, seen_ids)
+        _walk_controllable_layers(item, result, seen_ids, force_collect_ids)
     return result
 
 
