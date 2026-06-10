@@ -7,6 +7,7 @@ import numpy as np
 
 import folium
 from folium import plugins
+from folium.plugins._time_dimension import TIME_DIMENSION_SHARED_CLASS_JS
 from folium.template import Template
 from folium.utilities import normalize
 

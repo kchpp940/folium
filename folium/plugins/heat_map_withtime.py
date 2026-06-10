@@ -1,5 +1,9 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer
+from folium.plugins._time_dimension import (
+    TIME_DIMENSION_SHARED_CLASS_JS,
+    TIMELINE_SLIDER_ISOLATION_CSS,
+)
 from folium.template import Template
 from folium.utilities import none_max, none_min
 
@@ -57,7 +61,8 @@ class HeatMapWithTime(JSCSSMixin, Layer):
 
     """
 
-    _template = Template("""
+    _template = Template(
+        """
         {% macro header(this, kwargs) %}
             <script>
             var TDHeatmap = L.TimeDimension.Layer.extend({
@@ -122,37 +127,9 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                 }
             });
 
-            if (typeof L.Control.TimeDimensionShared === 'undefined') {
-                L.Control.TimeDimensionShared = L.Control.TimeDimension.extend({
-                    initialize: function(options) {
-                        var playerOptions = {
-                            buffer: 1,
-                            minBufferReady: -1
-                        };
-                        options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
-                        L.Control.TimeDimension.prototype.initialize.call(this, options);
-                        this._formatStrategy = options.formatStrategy || 'moment';
-                        this._formatOptions = options.formatOptions || {};
-                        this._index = options.index || null;
-                    },
-                    _getDisplayDateFormat: function(date) {
-                        if (this._formatStrategy === 'index' && this._index) {
-                            return this._index[date.getTime() - 1];
-                        } else if (this._formatStrategy === 'moment') {
-                            var fmt = this._formatOptions.dateFormat || 'YYYY-MM-DD HH:mm:ss';
-                            return new moment(date).format(fmt);
-                        }
-                        return date.toString();
-                    },
-                    setFormatStrategy: function(strategy, options) {
-                        this._formatStrategy = strategy;
-                        this._formatOptions = options || {};
-                        if (options && options.index) {
-                            this._index = options.index;
-                        }
-                    }
-                });
-            }
+            """
+        + TIME_DIMENSION_SHARED_CLASS_JS
+        + """
             </script>
         {% endmacro %}
 
@@ -221,7 +198,8 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                 });
 
         {% endmacro %}
-        """)
+        """
+    )
 
     default_js = [
         (

@@ -4,6 +4,7 @@ from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
 from folium.folium import Map
+from folium.plugins._time_dimension import TIME_DIMENSION_SHARED_CLASS_JS
 from folium.template import Template
 from folium.utilities import get_bounds, remove_empty
 
@@ -78,40 +79,17 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
 
     """
 
-    _template = Template("""
-        {% macro script(this, kwargs) %}
-            if (typeof L.Control.TimeDimensionShared === 'undefined') {
-                L.Control.TimeDimensionShared = L.Control.TimeDimension.extend({
-                    initialize: function(options) {
-                        var playerOptions = {
-                            buffer: 1,
-                            minBufferReady: -1
-                        };
-                        options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
-                        L.Control.TimeDimension.prototype.initialize.call(this, options);
-                        this._formatStrategy = options.formatStrategy || 'moment';
-                        this._formatOptions = options.formatOptions || {};
-                        this._index = options.index || null;
-                    },
-                    _getDisplayDateFormat: function(date) {
-                        if (this._formatStrategy === 'index' && this._index) {
-                            return this._index[date.getTime() - 1];
-                        } else if (this._formatStrategy === 'moment') {
-                            var fmt = this._formatOptions.dateFormat || 'YYYY-MM-DD HH:mm:ss';
-                            return new moment(date).format(fmt);
-                        }
-                        return date.toString();
-                    },
-                    setFormatStrategy: function(strategy, options) {
-                        this._formatStrategy = strategy;
-                        this._formatOptions = options || {};
-                        if (options && options.index) {
-                            this._index = options.index;
-                        }
-                    }
-                });
-            }
+    _template = Template(
+        """
+        {% macro header(this, kwargs) %}
+            <script>
+            """
+        + TIME_DIMENSION_SHARED_CLASS_JS
+        + """
+            </script>
+        {% endmacro %}
 
+        {% macro script(this, kwargs) %}
             var map = {{this._parent.get_name()}};
             if (!map.timeDimension) {
                 map.timeDimension = L.timeDimension(
@@ -125,9 +103,9 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
             controlOptions.formatStrategy = 'moment';
             controlOptions.formatOptions = { dateFormat: "{{this.date_options}}" };
             if (!map._timeDimensionControl) {
-                var timeDimensionControl = new L.Control.TimeDimensionShared(controlOptions);
-                map.addControl(timeDimensionControl);
-                map._timeDimensionControl = timeDimensionControl;
+                var {{this._control_name}} = new L.Control.TimeDimensionShared(controlOptions);
+                map.addControl({{this._control_name}});
+                map._timeDimensionControl = {{this._control_name}};
             } else {
                 map._timeDimensionControl.setFormatStrategy('moment', {dateFormat: "{{this.date_options}}"});
             }
@@ -175,7 +153,8 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
                 }
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
-        """)  # noqa
+        """
+    )  # noqa
 
     default_js = [
         (
@@ -229,6 +208,7 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
     ):
         super().__init__()
         self._name = "TimestampedGeoJson"
+        self._control_name = self.get_name() + "Control"
 
         if "read" in dir(data):
             self.embed = True

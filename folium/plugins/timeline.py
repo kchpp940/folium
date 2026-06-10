@@ -5,6 +5,7 @@ from branca.element import MacroElement
 from folium.elements import JSCSSMixin
 from folium.features import GeoJson
 from folium.folium import Map
+from folium.plugins._time_dimension import TIMELINE_SLIDER_ISOLATION_CSS
 from folium.template import Template
 from folium.utilities import JsCode, get_bounds, remove_empty
 
@@ -172,6 +173,7 @@ class TimelineSlider(JSCSSMixin, MacroElement):
                     margin: 0;
                     margin-bottom: 15px;
                 }
+                """ + TIMELINE_SLIDER_ISOLATION_CSS + """
             </style>
         {% endmacro %}
 
