@@ -236,113 +236,6 @@ class LayerGroup(Layer):
         self.options = remove_empty(**kwargs)
 
 
-def _walk_controllable_layers(element, result, seen_ids, force_collect_ids=None):
-    """
-    Core walking logic for collecting controllable Layer objects.
-
-    Rules:
-    - If the element IS a Layer that is "collectible" (see below): record it
-      in *result* (deduped by object id via *seen_ids*) and STOP — do NOT
-      descend into its children, because it is a control boundary.
-    - Otherwise: descend into its _children to look for nested layers.
-
-    A Layer is "collectible" when **either**:
-      * ``element.control`` is True (the normal rule), **or**
-      * the element's ``id()`` is in *force_collect_ids* — this lets
-        callers like GroupedLayerControl re-collect layers whose
-        ``control`` flag has already been flipped to False, without
-        needing to temporarily restore the flag.
-
-    Arguments
-    ---------
-    element : object
-        The element from which to start walking.
-    result : OrderedDict[str, dict]
-        Accumulator dict; modified in place.
-    seen_ids : set[int]
-        Accumulator set of already-seen Layer object ids; modified in place.
-    force_collect_ids : set[int] or None
-        If provided, Layer objects whose ``id()`` is in this set are
-        treated as if they had ``control=True``, regardless of their
-        actual ``control`` attribute.
-    """
-    is_layer = isinstance(element, Layer)
-    forced = force_collect_ids is not None and id(element) in force_collect_ids
-    is_collectible = is_layer and (forced or element.control)
-    if is_collectible:
-        obj_id = id(element)
-        if obj_id not in seen_ids:
-            seen_ids.add(obj_id)
-            key = element.get_name()
-            result[key] = {
-                "label": element.layer_name,
-                "layer_js": element.get_name(),
-                "overlay": element.overlay,
-                "show": element.show,
-                "layer": element,
-            }
-        return
-
-    if hasattr(element, "_children"):
-        for child in element._children.values():
-            _walk_controllable_layers(child, result, seen_ids, force_collect_ids)
-
-
-def _collect_from_iterable(iterable, force_collect_ids=None):
-    """
-    Apply the same control-boundary / dedup rules as
-    _collect_controllable_layers, but starting from an arbitrary iterable
-    of elements (instead of the children of a single parent).
-
-    When *force_collect_ids* is provided, Layer objects whose ``id()``
-    is in that set are treated as if they had ``control=True``.  This
-    lets GroupedLayerControl re-collect layers it already set to
-    ``control=False`` without any temporary flag flipping.
-
-    Returns an OrderedDict with the same structure as
-    _collect_controllable_layers.
-    """
-    from collections import OrderedDict as _OD
-
-    result: OrderedDict[str, dict] = _OD()
-    seen_ids: set[int] = set()
-    for item in iterable:
-        _walk_controllable_layers(item, result, seen_ids, force_collect_ids)
-    return result
-
-
-def _collect_controllable_layers(parent):
-    """
-    Recursively collect all controllable Layer objects from an element tree.
-
-    A controllable Layer is one where control=True. Such layers act as
-    "control boundaries": the layer itself is collected, but its children
-    are not traversed further, because they are considered part of this
-    group's domain and should not appear as separate top-level controls.
-
-    Non-Layer elements and layers with control=False are traversed into,
-    so that nested controllable layers can still be discovered.
-
-    Returns an OrderedDict where keys are unique layer identifiers (get_name())
-    and values are dicts with the following keys:
-    - label: the display name (layer_name)
-    - layer_js: the JavaScript variable name (get_name())
-    - overlay: whether the layer is an overlay (True) or base layer (False)
-    - show: whether the layer is shown by default
-    - layer: the Layer object itself
-
-    Layers are deduplicated by object identity, so the same layer object
-    will only appear once even if it's reachable through multiple paths.
-    The order of layers follows a depth-first traversal of the element tree.
-    """
-    result: OrderedDict[str, dict] = OrderedDict()
-    seen_ids: set[int] = set()
-    if hasattr(parent, "_children"):
-        for child in parent._children.values():
-            _walk_controllable_layers(child, result, seen_ids)
-    return result
-
-
 class LayerControl(MacroElement):
     """
     Creates a LayerControl object to be added on a folium map.
@@ -381,12 +274,12 @@ class LayerControl(MacroElement):
             var {{ this.get_name() }}_layers = {
                 base_layers : {
                     {%- for key, val in this.base_layers.items() %}
-                    {{ val.label|tojson }} : {{ val.layer_js }},
+                    {{ key|tojson }} : {{val}},
                     {%- endfor %}
                 },
                 overlays :  {
                     {%- for key, val in this.overlays.items() %}
-                    {{ val.label|tojson }} : {{ val.layer_js }},
+                    {{ key|tojson }} : {{val}},
                     {%- endfor %}
                 },
             };
@@ -417,8 +310,8 @@ class LayerControl(MacroElement):
             position=position, collapsed=collapsed, autoZIndex=autoZIndex, **kwargs
         )
         self.draggable = draggable
-        self.base_layers: OrderedDict[str, dict] = OrderedDict()
-        self.overlays: OrderedDict[str, dict] = OrderedDict()
+        self.base_layers: OrderedDict[str, str] = OrderedDict()
+        self.overlays: OrderedDict[str, str] = OrderedDict()
 
     def reset(self) -> None:
         self.base_layers = OrderedDict()
@@ -426,23 +319,15 @@ class LayerControl(MacroElement):
 
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
-        from folium.plugins.groupedlayercontrol import GroupedLayerControl
-
         self.reset()
-        excluded_ids: set[int] = set()
-        if hasattr(self._parent, "_children"):
-            for child in self._parent._children.values():
-                if isinstance(child, GroupedLayerControl):
-                    child.refresh_controlled_layer_ids()
-                    excluded_ids.update(child.get_controlled_layer_ids())
-        all_layers = _collect_controllable_layers(self._parent)
-        for key, layer_info in all_layers.items():
-            if id(layer_info["layer"]) in excluded_ids:
+        for item in self._parent._children.values():
+            if not isinstance(item, Layer) or not item.control:
                 continue
-            if not layer_info["overlay"]:
-                self.base_layers[key] = layer_info
+            key = item.layer_name
+            if not item.overlay:
+                self.base_layers[key] = item.get_name()
             else:
-                self.overlays[key] = layer_info
+                self.overlays[key] = item.get_name()
         super().render()
 
 

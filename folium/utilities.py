@@ -9,6 +9,7 @@ import tempfile
 import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from os import PathLike
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -155,6 +156,44 @@ def if_pandas_df_convert_to_numpy(obj: Any) -> Any:
         return obj
 
 
+def _is_array_like(obj: Any) -> bool:
+    """Check if an object is array-like (numpy ndarray, list, tuple, etc.)."""
+    if "ndarray" in obj.__class__.__name__:
+        return True
+    if isinstance(obj, (list, tuple)):
+        return True
+    if hasattr(obj, "__array__"):
+        return True
+    return False
+
+
+def _is_path_like(obj: Any) -> bool:
+    """Check if an object is path-like (os.PathLike)."""
+    return isinstance(obj, PathLike)
+
+
+def _image_source_type(image: Any) -> str:
+    """
+    Determine the type of an image source.
+
+    Returns one of: 'array', 'pathlike', 'url', 'file', 'raw'.
+    """
+    if isinstance(image, str):
+        if _is_url(image):
+            return "url"
+        if os.path.isfile(image):
+            return "file"
+        return "raw"
+
+    if _is_path_like(image):
+        return "pathlike"
+
+    if _is_array_like(image):
+        return "array"
+
+    return "raw"
+
+
 def image_to_url(
     image: Any,
     colormap: Optional[Callable] = None,
@@ -165,14 +204,16 @@ def image_to_url(
 
     Parameters
     ----------
-    image: string or array-like object
-        *  If string is a path to an image file, its content will be converted and
-           embedded in the output URL.
+    image: string, PathLike, or array-like object
+        *  If string is a path to an image file and the file exists,
+           its content will be converted and embedded in the output URL.
+        *  If PathLike object, it will be treated as a file path and
+           its content will be converted and embedded in the output URL.
         *  If string is a URL, it will be linked in the output URL.
-        *  Otherwise a string will be assumed to be JSON and embedded in the
-           output URL.
-        *  If array-like, it will be converted to PNG base64 string and embedded in the
-           output URL.
+        *  Otherwise a string will be assumed to be raw content (JSON, SVG,
+           base64, etc.) and embedded in the output URL.
+        *  If array-like, it will be converted to PNG base64 string and
+           embedded in the output URL.
     origin: ['upper' | 'lower'], optional, default 'upper'
         Place the [0, 0] index of the array in the upper left or
         lower left corner of the axes.
@@ -183,19 +224,33 @@ def image_to_url(
         0. and 1.  You can use colormaps from `matplotlib.cm`.
 
     """
-    if isinstance(image, str) and not _is_url(image):
+    source_type = _image_source_type(image)
+
+    if source_type == "array":
+        img = write_png(image, origin=origin, colormap=colormap)
+        b64encoded = base64.b64encode(img).decode("utf-8")
+        url = f"data:image/png;base64,{b64encoded}"
+    elif source_type == "pathlike":
+        file_path = os.fspath(image)
+        fileformat = os.path.splitext(file_path)[-1][1:]
+        with open(file_path, "rb") as f:
+            img = f.read()
+        b64encoded = base64.b64encode(img).decode("utf-8")
+        url = f"data:image/{fileformat};base64,{b64encoded}"
+    elif source_type == "url":
+        url = image
+    elif source_type == "file":
         fileformat = os.path.splitext(image)[-1][1:]
         with open(image, "rb") as f:
             img = f.read()
         b64encoded = base64.b64encode(img).decode("utf-8")
         url = f"data:image/{fileformat};base64,{b64encoded}"
-    elif "ndarray" in image.__class__.__name__:
-        img = write_png(image, origin=origin, colormap=colormap)
-        b64encoded = base64.b64encode(img).decode("utf-8")
-        url = f"data:image/png;base64,{b64encoded}"
     else:
-        # Round-trip to ensure a nice formatted json.
-        url = json.loads(json.dumps(image))
+        if isinstance(image, str):
+            url = image
+        else:
+            url = json.dumps(image)
+
     return url.replace("\n", " ")
 
 
