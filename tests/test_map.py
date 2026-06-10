@@ -9,8 +9,9 @@ import warnings
 import numpy as np
 import pytest
 
-from folium import GeoJson, Map, TileLayer
+from folium import FeatureGroup, GeoJson, Map, TileLayer
 from folium.map import Class, CustomPane, Icon, LayerControl, Marker, Popup
+from folium.plugins import FeatureGroupSubGroup, MarkerCluster
 from folium.utilities import JsCode, normalize
 
 tmpl = """
@@ -77,6 +78,73 @@ def test_layer_control_draggable():
     expected = f"new L.Draggable({ layer_control.get_name() }.getContainer()).enable();"
     rendered = m.get_root().render()
     assert normalize(expected) in normalize(rendered)
+
+
+def test_layer_control_boundary_control_true_stops_descending():
+    m = Map(tiles=None)
+    outer = FeatureGroup(name="Outer", control=True).add_to(m)
+    inner = FeatureGroup(name="Inner", control=True)
+    outer.add_child(inner)
+    lc = LayerControl().add_to(m)
+    lc.render()
+    labels = [v["label"] for v in lc.overlays.values()]
+    assert "Outer" in labels
+    assert "Inner" not in labels
+
+
+def test_layer_control_boundary_control_false_descends():
+    m = Map(tiles=None)
+    outer = FeatureGroup(name="Outer", control=False).add_to(m)
+    inner = FeatureGroup(name="Inner", control=True)
+    outer.add_child(inner)
+    lc = LayerControl().add_to(m)
+    lc.render()
+    labels = [v["label"] for v in lc.overlays.values()]
+    assert "Outer" not in labels
+    assert "Inner" in labels
+
+
+def test_layer_control_same_name_preserves_both():
+    m = Map(tiles=None)
+    a = TileLayer(name="Same").add_to(m)
+    b = FeatureGroup(name="Same").add_to(m)
+    lc = LayerControl().add_to(m)
+    lc.render()
+    base_labels = [v["label"] for v in lc.base_layers.values()]
+    overlay_labels = [v["label"] for v in lc.overlays.values()]
+    assert base_labels.count("Same") == 1
+    assert overlay_labels.count("Same") == 1
+    assert len(lc.base_layers) == 1
+    assert len(lc.overlays) == 1
+
+
+def test_layer_control_dedup_same_object_multiple_paths():
+    m = Map(tiles=None)
+    fg1 = FeatureGroup(name="G1", control=False).add_to(m)
+    fg2 = FeatureGroup(name="G2", control=False).add_to(m)
+    shared = FeatureGroup(name="Shared", control=True)
+    fg1.add_child(shared)
+    fg2.add_child(shared)
+    lc = LayerControl().add_to(m)
+    lc.render()
+    labels = [v["label"] for v in lc.overlays.values()]
+    assert labels.count("Shared") == 1
+    assert len(lc.overlays) == 1
+
+
+def test_layer_control_feature_group_subgroup_with_marker_cluster():
+    m = Map(tiles=None)
+    mcg = MarkerCluster(control=False).add_to(m)
+    sg1 = FeatureGroupSubGroup(mcg, "SG 1").add_to(m)
+    sg1.add_child(Marker([0, 0]))
+    sg2 = FeatureGroupSubGroup(mcg, "SG 2").add_to(m)
+    sg2.add_child(Marker([1, 1]))
+    lc = LayerControl().add_to(m)
+    lc.render()
+    labels = [v["label"] for v in lc.overlays.values()]
+    assert "SG 1" in labels
+    assert "SG 2" in labels
+    assert len(lc.overlays) == 2
 
 
 def test_popup_ascii():

@@ -1,6 +1,9 @@
+from collections import OrderedDict
+
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.map import Layer, _collect_from_iterable
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -8,6 +11,16 @@ from folium.utilities import remove_empty
 class GroupedLayerControl(JSCSSMixin, MacroElement):
     """
     Create a Layer Control with groups of overlays.
+
+    Uses the same control-boundary / dedup semantics as the regular
+    LayerControl:
+    - A ``Layer`` with ``control=True`` acts as a boundary: it is
+      collected as a single entry and its children are NOT descended into.
+    - A ``Layer`` with ``control=False`` (or any non-Layer element) is
+      descended into so that nested ``control=True`` layers are discovered.
+    - Duplicate Layer objects are deduplicated by identity within a group.
+    - Layers sharing the same display ``layer_name`` are kept as separate
+      entries thanks to the internal unique key (``get_name()``).
 
     Parameters
     ----------
@@ -74,37 +87,53 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         self._groups = groups
         self._exclusive_groups = exclusive_groups
         self.layers_untoggle = set()
-        self.grouped_overlays = {}
-        for element in self._iter_all_layers():
-            element.control = False
-
-    def _iter_all_layers(self):
-        seen = set()
+        self.grouped_overlays: "OrderedDict[str, OrderedDict]" = OrderedDict()
+        self._controlled_layers: list = []
+        seen: set[int] = set()
         for sublist in self._groups.values():
-            for element in sublist:
-                if id(element) not in seen:
-                    seen.add(id(element))
-                    yield element
+            collected = _collect_from_iterable(sublist)
+            for info in collected.values():
+                layer = info["layer"]
+                if id(layer) not in seen:
+                    seen.add(id(layer))
+                    self._controlled_layers.append(layer)
+                    layer.control = False
 
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
         self.layers_untoggle = set()
-        self.grouped_overlays = {}
-        for group_name, sublist in self._groups.items():
-            self.grouped_overlays[group_name] = {}
-            group_seen_ids = set()
-            for idx, element in enumerate(sublist):
-                obj_id = id(element)
-                if obj_id in group_seen_ids:
-                    continue
-                group_seen_ids.add(obj_id)
-                key = element.get_name()
-                self.grouped_overlays[group_name][key] = {
-                    "label": element.layer_name,
-                    "layer_js": element.get_name(),
-                }
-                if not element.show:
-                    self.layers_untoggle.add(element.get_name())
-                if self._exclusive_groups and idx > 0:
-                    self.layers_untoggle.add(element.get_name())
+        self.grouped_overlays = OrderedDict()
+        for layer in self._controlled_layers:
+            layer.control = True
+        try:
+            extra_layers = []
+            for group_name, sublist in self._groups.items():
+                self.grouped_overlays[group_name] = OrderedDict()
+                for entry_idx, entry in enumerate(sublist):
+                    collected = _collect_from_iterable([entry])
+                    if not collected:
+                        continue
+                    entries = list(collected.values())
+                    for info in entries:
+                        layer = info["layer"]
+                        if id(layer) not in {
+                            id(l) for l in self._controlled_layers
+                        }:
+                            extra_layers.append(layer)
+                        key = info["layer"].get_name()
+                        self.grouped_overlays[group_name][key] = {
+                            "label": info["label"],
+                            "layer_js": info["layer_js"],
+                        }
+                        if not info["show"]:
+                            self.layers_untoggle.add(info["layer_js"])
+                        if self._exclusive_groups and entry_idx > 0:
+                            self.layers_untoggle.add(info["layer_js"])
+                if not self.grouped_overlays[group_name]:
+                    del self.grouped_overlays[group_name]
+        finally:
+            for layer in self._controlled_layers:
+                layer.control = False
+            for layer in extra_layers:
+                layer.control = False
         super().render()
