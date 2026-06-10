@@ -550,3 +550,118 @@ class TestBackwardCompatibility:
         assert "highlight" in rendered.lower() or "mouseover" in rendered.lower()
         # Our new click event is also there
         assert '"click": ' in rendered
+
+
+class TestEventHandlerAbsorption:
+    """Tests for the unified event path: add_child(EventHandler) is absorbed."""
+
+    def test_add_child_event_handler_absorbed(self, test_map):
+        """Test that add_child(EventHandler(...)) is absorbed into _event_handlers."""
+        from folium.elements import EventHandler
+        from folium.utilities import JsCode
+
+        c = Circle(location=[0, 0], radius=100)
+        handler = JsCode("function(e) { console.log('absorbed'); }")
+        c.add_child(EventHandler("click", handler))
+
+        assert c.has_events(), "EventHandler should be absorbed into _event_handlers"
+        assert c.get_event("click") is not None, "click event should exist"
+        rendered = _render_layer(c, test_map)
+        name = c.get_name()
+        assert f'{name}.on("click"' in rendered, "Absorbed event should render"
+        assert "console.log('absorbed')" in rendered, "Handler body should render"
+
+    def test_add_child_event_handler_no_duplicate(self, test_map):
+        """Test no duplicate binding when events= and add_child both set same event."""
+        import warnings
+        from folium.elements import EventHandler
+        from folium.utilities import JsCode
+
+        c = Circle(
+            location=[0, 0],
+            radius=100,
+            events={"click": "alert"},
+        )
+        handler = JsCode("function(e) { console.log('from EventHandler'); }")
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            c.add_child(EventHandler("click", handler))
+            assert len(w) == 1, "Should warn about duplicate event"
+            assert "already set" in str(w[0].message)
+
+        # Should still only have 1 click event (the original from events=)
+        assert len(c._event_handlers) == 1
+        rendered = _render_layer(c, test_map)
+        name = c.get_name()
+        # The original 'alert' action should be rendered, NOT the EventHandler one
+        assert "alert(msg)" in rendered
+        assert "from EventHandler" not in rendered
+
+    def test_add_child_event_handler_different_events(self, test_map):
+        """Test add_child(EventHandler) for a different event name works."""
+        from folium.elements import EventHandler
+        from folium.utilities import JsCode
+
+        c = Circle(
+            location=[0, 0],
+            radius=100,
+            events={"click": "alert"},
+        )
+        handler = JsCode("function(e) { console.log('hover'); }")
+        c.add_child(EventHandler("mouseover", handler))
+
+        assert len(c._event_handlers) == 2
+        rendered = _render_layer(c, test_map)
+        name = c.get_name()
+        assert f'{name}.on("click"' in rendered
+        assert f'{name}.on("mouseover"' in rendered
+
+    def test_geojson_absorb_event_handler(self):
+        """Test GeoJson absorbs add_child(EventHandler) into layer-level events."""
+        from folium.elements import EventHandler
+        from folium.utilities import JsCode
+
+        feature_data = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {"name": "test"},
+            }],
+        }
+        g = GeoJson(feature_data)
+        handler = JsCode("function(e) { console.log('geo event'); }")
+        g.add_child(EventHandler("mouseover", handler))
+
+        # Should go to layer-level events (matches original EventHandler behavior)
+        assert g.has_layer_events(), "EventHandler should be absorbed into layer events"
+        assert not g.has_events(), "Should NOT be in feature-level events"
+        import folium
+        m = folium.Map(location=[0, 0], zoom_start=8)
+        g.add_to(m)
+        m._repr_html_()
+        rendered = g._template.module.script(g)
+        g_name = g.get_name()
+        assert f'{g_name}.on("mouseover"' in rendered, "Should render as layer-level .on()"
+
+    def test_add_child_non_event_handler_passthrough(self, test_map):
+        """Test that non-EventHandler children still get added normally."""
+        c = Circle(location=[0, 0], radius=100, events={"click": "alert"})
+        from folium.map import Popup
+        c.add_child(Popup("test popup"))
+
+        # Popup is added as a child (not absorbed)
+        children_names = [child._name for child in c._children.values()]
+        assert "Popup" in children_names, "Popup should be a normal child, not absorbed"
+
+    def test_evented_on_uses_unified_path(self, test_map):
+        """Test that Evented.on() uses the unified path for EventMixin layers."""
+        from folium.utilities import JsCode
+
+        m = folium.Map(location=[0, 0])
+        handler = JsCode("function(e) { console.log('via_on_test'); }")
+        m.on(click=handler)
+
+        html = m._repr_html_()
+        assert "via_on_test" in html, "Evented.on() handler should be in HTML"

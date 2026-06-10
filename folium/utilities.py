@@ -548,10 +548,13 @@ TypeEventHandlers = dict[str, Union[str, JsCode, EventHandlerSpec]]
 class EventMixin:
     """
     Mixin class that provides unified event binding capabilities.
-    
+
     Add this mixin to any MacroElement subclass to enable event binding
-    through the `events` parameter.
-    
+    through the `events` parameter. This mixin also intercepts
+    ``add_child(EventHandler(...))`` calls and absorbs them into the
+    same internal ``_event_handlers`` dictionary, so there is only one
+    rendering path for all event bindings.
+
     Examples
     --------
     >>> class MyLayer(EventMixin, MacroElement):
@@ -664,6 +667,41 @@ class EventMixin:
     def has_events(self) -> bool:
         """Check if any event handlers are configured."""
         return bool(self._event_handlers)
+
+    def _absorb_event_handler(self, event_handler: Any) -> bool:
+        """Absorb an elements.EventHandler into the unified _event_handlers dict.
+
+        Returns True if the handler was absorbed, False if it is not
+        an EventHandler instance.
+        """
+        from folium.elements import EventHandler as _LegacyEventHandler
+
+        if not isinstance(event_handler, _LegacyEventHandler):
+            return False
+        event_name = event_handler.event
+        if event_name in self._event_handlers:
+            import warnings
+            warnings.warn(
+                f"Event '{event_name}' already set via `events` parameter. "
+                f"The add_child(EventHandler(...)) call for the same event "
+                f"is ignored to avoid duplicate bindings.",
+                UserWarning,
+                stacklevel=4,
+            )
+            return True
+        self._event_handlers[event_name] = EventHandlerSpec(event_handler.handler)
+        return True
+
+    def add_child(self, child: Any, name: Optional[str] = None, index: Optional[int] = None):
+        """Override add_child to intercept EventHandler children.
+
+        When an EventHandler is added as a child, it is absorbed into
+        the internal _event_handlers dictionary instead of being rendered
+        as a separate MacroElement, avoiding duplicate bindings.
+        """
+        if self._absorb_event_handler(child):
+            return self
+        return super().add_child(child, name=name, index=index)
 
     def _render_event_bindings(self, layer_var_name: str) -> str:
         """

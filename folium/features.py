@@ -35,6 +35,7 @@ from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
 from folium.template import Template
 from folium.utilities import (
+    EventHandlerSpec,
     EventMixin,
     JsCode,
     TypeBoundsReturn,
@@ -771,8 +772,6 @@ class GeoJson(EventMixin, Layer):
         self.on_each_feature = on_each_feature
         self.options = remove_empty(**kwargs)
 
-        from folium.utilities import EventHandlerSpec
-
         self._layer_event_handlers: dict[str, EventHandlerSpec] = {}
         if layer_events:
             if not isinstance(layer_events, dict):
@@ -816,8 +815,6 @@ class GeoJson(EventMixin, Layer):
         handler : str, JsCode
             The event handler to bind. Same format as `events` parameter.
         """
-        from folium.utilities import EventHandlerSpec
-
         self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
 
     def remove_layer_event(self, event_name: str) -> bool:
@@ -848,6 +845,37 @@ class GeoJson(EventMixin, Layer):
                 f"{event_handler.to_javascript()});"
             )
         return "\n".join(lines)
+
+    def _absorb_event_handler(self, event_handler: Any) -> bool:
+        """Absorb an elements.EventHandler for GeoJson.
+
+        For GeoJson, the absorbed handler goes into the layer-level
+        ``_layer_event_handlers`` dict (bound to the GeoJson layer as a
+        whole via ``{name}.on(event, handler)``). This matches the
+        original ``add_child(EventHandler(...))`` behavior where the
+        handler was rendered as ``{parent_name}.on(...)``.
+
+        If a feature-level event with the same name already exists in
+        ``_event_handlers`` (set via the ``events`` parameter), a
+        warning is issued and the ``EventHandler`` is ignored.
+        """
+        from folium.elements import EventHandler as _LegacyEventHandler
+
+        if not isinstance(event_handler, _LegacyEventHandler):
+            return False
+        event_name = event_handler.event
+        if event_name in self._layer_event_handlers or event_name in self._event_handlers:
+            import warnings
+            warnings.warn(
+                f"Event '{event_name}' already set via `events` or `layer_events` "
+                f"parameter. The add_child(EventHandler(...)) call for the same "
+                f"event is ignored to avoid duplicate bindings.",
+                UserWarning,
+                stacklevel=4,
+            )
+            return True
+        self._layer_event_handlers[event_name] = EventHandlerSpec(event_handler.handler)
+        return True
 
     def process_data(self, data: Any) -> dict:
         """Convert an unknown data input into a geojson dictionary."""
