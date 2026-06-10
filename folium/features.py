@@ -4,9 +4,7 @@ Leaflet GeoJson and miscellaneous features.
 """
 
 import copy
-import functools
 import json
-import operator
 import warnings
 from collections.abc import Iterable, Sequence
 from typing import (
@@ -722,7 +720,7 @@ class GeoJson(Layer):
                     "style_function and highlight_function require "
                     "`embed=True` because the data needs to be processed."
                 )
-            self._normalize_data()
+            self._to_feature_collection()
             if style_function is not None:
                 self._validate_function(style_function, "style_function")
                 self.style_function = style_function
@@ -731,7 +729,7 @@ class GeoJson(Layer):
                 self._validate_function(highlight_function, "highlight_function")
                 self.highlight_function = highlight_function
                 self.highlight_map: dict = {}
-            self.feature_identifier = self._select_identifier()
+            self.feature_identifier = self._resolve_feature_identifier()
 
         if isinstance(tooltip, (GeoJsonTooltip, Tooltip)):
             self.add_child(tooltip)
@@ -750,10 +748,10 @@ class GeoJson(Layer):
                 if not self.embed:
                     self.embed_link = data
                 return self.get_geojson_from_web(data)
-            elif data.lstrip()[0] in "[{":  # This is a GeoJSON inline string
+            elif data.lstrip()[0] in "[{":
                 self.embed = True
                 return json.loads(data)
-            else:  # This is a filename
+            else:
                 if not self.embed:
                     self.embed_link = data
                 with open(data) as f:
@@ -771,86 +769,99 @@ class GeoJson(Layer):
     def get_geojson_from_web(self, url: str) -> dict:
         return requests.get(url).json()
 
-    def _normalize_data(self) -> None:
-        """Normalize data into a consistent FeatureCollection structure.
+    def _ensure_properties(self) -> None:
+        """Ensure every feature has a non-None ``properties`` dict.
 
-        Performs the following operations on the internal data copy:
-        - Converts single Feature or raw Geometry to FeatureCollection
-        - Ensures every feature has a non-None ``properties`` dict
+        This is the lightest normalization step: it never changes the
+        top-level data type, never converts geometries to features, and
+        never assigns ids. It works on:
 
-        Identifier assignment is handled separately by
-        :meth:`_ensure_unique_ids` only when an identifier is actually
-        needed (i.e. when style_function or highlight_function is used).
+        * ``FeatureCollection``: every feature is inspected.
+        * Single ``Feature``: its own properties are inspected.
+        * Raw ``Geometry`` or ``GeometryCollection``: left untouched.
 
-        This method operates only on the internal deep copy; the caller's
-        original data is never modified.
+        Operates only on the internal deep copy; the caller's original
+        data is never modified.
         """
         data = self.data
+        data_type = data.get("type")
 
-        if data.get("type") != "FeatureCollection":
-            if "geometry" not in data:
-                data = {
-                    "type": "Feature",
-                    "geometry": data,
-                    "properties": {},
-                }
-            else:
-                if "properties" not in data or data["properties"] is None:
-                    data["properties"] = {}
-            data = {"type": "FeatureCollection", "features": [data]}
-            self.data = data
+        if data_type == "FeatureCollection":
+            for feat in data["features"]:
+                if "properties" not in feat or feat["properties"] is None:
+                    feat["properties"] = {}
+        elif data_type == "Feature":
+            if "properties" not in data or data["properties"] is None:
+                data["properties"] = {}
 
-        for feature in data["features"]:
-            if "properties" not in feature or feature["properties"] is None:
-                feature["properties"] = {}
+    def _to_feature_collection(self) -> None:
+        """Convert a single Feature or raw Geometry to FeatureCollection.
 
-    def _ensure_unique_ids(self) -> None:
-        """Assign unique internal ids where user-provided ids are
-        missing, invalid, or duplicated.
+        Automatically ensures properties are normalized before converting.
+        Must only be called when a FeatureCollection is actually required
+        (e.g. style/highlight processing, tooltip/popup rendering, which
+        iterate over ``data["features"]``).
 
-        Internal ids are stringified integers guaranteed not to collide
-        with existing valid ids. This method is idempotent: calling it
-        multiple times produces the same result.
+        After this method ``self.data`` is guaranteed to be a
+        ``FeatureCollection`` with normalized properties on every feature.
+        """
+        self._ensure_properties()
+
+        data = self.data
+        data_type = data.get("type")
+
+        if data_type == "FeatureCollection":
+            return
+
+        if data_type == "Feature":
+            self.data = {"type": "FeatureCollection", "features": [data]}
+        else:
+            self.data = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": data,
+                        "properties": {},
+                    }
+                ],
+            }
+
+    def _assign_unique_ids(self) -> None:
+        """Assign unique internal ids to every feature.
+
+        When this method is called (because at least one feature lacks a
+        valid unique id), **all** features receive a fresh synthetic id
+        so the mapping is fully deterministic and stable. Internal ids
+        are stringified integers starting from ``"0"``.
+
+        Assumes :meth:`_ensure_properties` and :meth:`_to_feature_collection`
+        have already been called so that ``self.data`` is a
+        ``FeatureCollection``. This method is idempotent.
         """
         feats = self.data["features"]
         if not feats:
             return
 
-        existing_valid_ids: set = set()
-        needs_id: list[int] = []
         for idx, feat in enumerate(feats):
-            fid = feat.get("id")
-            if isinstance(fid, (str, int)) and fid not in existing_valid_ids:
-                existing_valid_ids.add(fid)
-            else:
-                needs_id.append(idx)
+            feat["id"] = str(idx)
 
-        if not needs_id:
-            return
+    def _resolve_feature_identifier(self) -> str:
+        """Choose the most appropriate Javascript identifier expression.
 
-        counter = 0
-        for idx in needs_id:
-                while str(counter) in existing_valid_ids:
-                    counter += 1
-                new_id = str(counter)
-                feats[idx]["id"] = new_id
-                existing_valid_ids.add(new_id)
-                counter += 1
+        Returns, in priority order:
 
-    def _select_identifier(self) -> str:
-        """Select the most appropriate Javascript identifier expression.
+        1. ``"feature.id"`` — when the user supplied valid unique ids
+           on every feature.
+        2. ``"feature.properties.<key>"`` — when a single property key
+           holds unique str/int values on every feature (preferred over
+           generating synthetic ids because it preserves the user's
+           natural identifier).
+        3. ``"feature.id"`` — fallback: synthetic ids are assigned via
+           :meth:`_assign_unique_ids` before returning.
 
-        Returns one of:
-        - ``"feature.id"`` if every feature has a unique valid ``id``
-          supplied by the user.
-        - ``"feature.properties.<key>"`` if a single property key holds
-          unique str/int values across all features (preferred over
-          generating internal ids because it preserves the user's natural
-          identifier).
-        - ``"feature.id"`` otherwise (fallback: internally generated unique ids are
-          assigned via :meth:`_ensure_unique_ids` before returning.
-
-        The selection is deterministic and based on the normalized data.
+        Assumes :meth:`_ensure_properties` and :meth:`_to_feature_collection`
+        have already been called.
         """
         feats = self.data["features"]
         if not feats:
@@ -864,12 +875,17 @@ class GeoJson(Layer):
         if len(user_supplied_ids) == len(feats) and len(set(user_supplied_ids)) == len(feats):
             return "feature.id"
 
-        if all(isinstance(feat.get("properties"), dict) for feat in feats) and feats[0]["properties"]:
-            for key in feats[0]["properties"]:
+        first_props = feats[0].get("properties")
+        if isinstance(first_props, dict) and first_props:
+            for key in first_props:
                 values: list = []
                 all_valid = True
                 for feat in feats:
-                    val = feat["properties"].get(key)
+                    props = feat.get("properties")
+                    if not isinstance(props, dict):
+                        all_valid = False
+                        break
+                    val = props.get(key)
                     if not isinstance(val, (str, int)):
                         all_valid = False
                         break
@@ -877,32 +893,35 @@ class GeoJson(Layer):
                 if all_valid and len(set(values)) == len(feats):
                     return f"feature.properties.{key}"
 
-        self._ensure_unique_ids()
+        self._assign_unique_ids()
         return "feature.id"
 
     def convert_to_feature_collection(self) -> None:
         """Convert data into a FeatureCollection if it is not already.
 
         .. deprecated::
-            This method is kept for backward compatibility. Normalization
-            now happens automatically during ``__init__`` via
-            :meth:`_normalize_data`.
+            This method is kept for backward compatibility. The
+            conversion now happens automatically when a
+            FeatureCollection is needed (e.g. style/highlight).
+            This method runs the full pipeline: properties
+            normalization → FC conversion → id assignment.
         """
         if self.embed:
-            self._normalize_data()
+            self._to_feature_collection()
+            self._assign_unique_ids()
 
     def find_identifier(self) -> str:
         """Find a unique identifier for each feature, create it if needed.
 
         .. deprecated::
-            This method is kept for backward compatibility. It returns
-            the same result as :meth:`_select_identifier`, while the
-            actual id generation has already happened in
-            :meth:`_normalize_data` during ``__init__``.
+            This method is kept for backward compatibility. Identifier
+            resolution now happens automatically during ``__init__``
+            when style/highlight is used. This method runs the full
+            pipeline and returns the identifier string.
         """
         if self.embed:
-            self._normalize_data()
-        return self._select_identifier()
+            self._to_feature_collection()
+        return self._resolve_feature_identifier()
 
     def _validate_function(self, func: Callable, name: str) -> None:
         """
@@ -1297,6 +1316,8 @@ class GeoJsonDetail(MacroElement):
         """Renders the HTML representation of the element."""
         figure = self.get_root()
         if isinstance(self._parent, GeoJson):
+            if self._parent.embed:
+                self._parent._to_feature_collection()
             keys = tuple(
                 self._parent.data["features"][0]["properties"].keys()
                 if self._parent.data["features"]
