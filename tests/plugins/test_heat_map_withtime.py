@@ -36,32 +36,53 @@ def test_heat_map_with_time():
     # We verify that the script part is correct.
     tmpl = Template("""
         var times = {{this.times}};
+        var map = {{this._parent.get_name()}};
 
-        {{this._parent.get_name()}}.timeDimension = L.timeDimension(
-            {times : times, currentTime: new Date(1)}
-        );
+        if (!map.timeDimension) {
+            map.timeDimension = L.timeDimension(
+                {times : times, currentTime: new Date(1)}
+            );
+        } else {
+            var existingTimes = map.timeDimension.getAvailableTimes();
+            var newTimes = times.filter(function(t) {
+                return existingTimes.indexOf(t) === -1;
+            });
+            if (newTimes.length > 0) {
+                var mergedTimes = existingTimes.concat(newTimes).sort(function(a, b) {
+                    return a - b;
+                });
+                map.timeDimension.setAvailableTimes(mergedTimes);
+            }
+        }
 
-        var {{this._control_name}} = new L.Control.TimeDimensionCustom({{this.index}}, {
-            autoPlay: {{this.auto_play}},
-            backwardButton: {{this.backward_button}},
-            displayDate: {{this.display_index}},
-            forwardButton: {{this.forward_button}},
-            limitMinimumRange: {{this.limit_minimum_range}},
-            limitSliders: {{this.limit_sliders}},
-            loopButton: {{this.loop_button}},
-            maxSpeed: {{this.max_speed}},
-            minSpeed: {{this.min_speed}},
-            playButton: {{this.play_button}},
-            playReverseButton: {{this.play_reverse_button}},
-            position: "{{this.position}}",
-            speedSlider: {{this.speed_slider}},
-            speedStep: {{this.speed_step}},
-            styleNS: "{{this.style_NS}}",
-            timeSlider: {{this.time_slider}},
-            timeSliderDragUpdate: {{this.time_slider_drag_update}},
-            timeSteps: {{this.index_steps}}
-            })
-            .addTo({{this._parent.get_name()}});
+        if (!map._timeDimensionControl) {
+            var {{this._control_name}} = new L.Control.TimeDimensionShared({
+                autoPlay: {{this.auto_play}},
+                backwardButton: {{this.backward_button}},
+                displayDate: {{this.display_index}},
+                forwardButton: {{this.forward_button}},
+                limitMinimumRange: {{this.limit_minimum_range}},
+                limitSliders: {{this.limit_sliders}},
+                loopButton: {{this.loop_button}},
+                maxSpeed: {{this.max_speed}},
+                minSpeed: {{this.min_speed}},
+                playButton: {{this.play_button}},
+                playReverseButton: {{this.play_reverse_button}},
+                position: "{{this.position}}",
+                speedSlider: {{this.speed_slider}},
+                speedStep: {{this.speed_step}},
+                styleNS: "{{this.style_NS}}",
+                timeSlider: {{this.time_slider}},
+                timeSliderDragUpdate: {{this.time_slider_drag_update}},
+                timeSteps: {{this.index_steps}},
+                formatStrategy: 'index',
+                index: {{this.index}}
+            });
+            {{this._control_name}}.addTo(map);
+            map._timeDimensionControl = {{this._control_name}};
+        } else {
+            map._timeDimensionControl.setFormatStrategy('index', {index: {{this.index}}});
+        }
 
             var {{this.get_name()}} = new TDHeatmap({{this.data}},
             {heatmapOptions: {

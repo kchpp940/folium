@@ -3,7 +3,9 @@ Leaflet GeoJson and miscellaneous features.
 
 """
 
+import functools
 import json
+import operator
 import warnings
 from collections.abc import Iterable, Sequence
 from typing import (
@@ -14,6 +16,7 @@ from typing import (
     get_args,
 )
 
+import numpy as np
 import requests
 from branca.colormap import ColorMap, LinearColormap, StepColormap
 from branca.element import (
@@ -27,9 +30,6 @@ from branca.element import (
 )
 from branca.utilities import color_brewer
 
-from folium._choropleth import ChoroplethColorMapper
-from folium._data_binding import ChoroplethDataBinder
-from folium._geojson_utils import get_feature_id, resolve_dotted_key
 from folium.elements import JSCSSMixin
 from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
@@ -903,7 +903,8 @@ class GeoJsonStyleMapper:
 
     def get_feature_id(self, feature: dict) -> Union[str, int]:
         """Return a value identifying the feature."""
-        value = get_feature_id(feature, self.feature_identifier)
+        fields = self.feature_identifier.split(".")[1:]
+        value = functools.reduce(operator.getitem, fields, feature)
         assert isinstance(value, (str, int))
         return value
 
@@ -1550,23 +1551,97 @@ class Choropleth(FeatureGroup):
                 DeprecationWarning,
             )
 
-        data_binder = ChoroplethDataBinder(data, columns)
+        # Create color_data dict
+        if hasattr(data, "set_index"):
+            # This is a pd.DataFrame
+            assert columns is not None
+            color_data = data.set_index(columns[0])[columns[1]].to_dict()  # type: ignore
+        elif hasattr(data, "to_dict"):
+            # This is a pd.Series
+            color_data = data.to_dict()  # type: ignore
+        elif data:
+            color_data = dict(data)
+        else:
+            color_data = None
 
-        color_mapper = ChoroplethColorMapper(
-            data_binder,
-            key_on,
-            fill_color=fill_color,
-            nan_fill_color=nan_fill_color,
-            fill_opacity=fill_opacity,
-            nan_fill_opacity=nan_fill_opacity,
-            bins=bins,
-            use_jenks=use_jenks,
-            legend_name=legend_name,
-        )
-        self.color_scale = color_mapper.color_scale
+        self.color_scale = None
+
+        if color_data is not None and key_on is not None:
+            real_values = np.array(list(color_data.values()))
+            real_values = real_values[~np.isnan(real_values)]
+            if use_jenks:
+                from jenkspy import jenks_breaks
+
+                if not isinstance(bins, int):
+                    raise ValueError(
+                        f"bins value must be an integer when using Jenks."
+                        f' Invalid value "{bins}" received.'
+                    )
+                bin_edges = np.array(jenks_breaks(real_values, bins), dtype=float)
+            else:
+                _, bin_edges = np.histogram(real_values, bins=bins)
+
+            bins_min, bins_max = min(bin_edges), max(bin_edges)
+            if np.any((real_values < bins_min) | (real_values > bins_max)):
+                raise ValueError(
+                    "All values are expected to fall into one of the provided "
+                    "bins (or to be Nan). Please check the `bins` parameter "
+                    "and/or your data."
+                )
+
+            # We add the colorscale
+            nb_bins = len(bin_edges) - 1
+            color_range = color_brewer(fill_color, n=nb_bins)
+            self.color_scale = StepColormap(
+                color_range,
+                index=list(bin_edges),
+                vmin=bins_min,
+                vmax=bins_max,
+                caption=legend_name,
+            )
+
+            # then we 'correct' the last edge for numpy digitize
+            # (we add a very small amount to fake an inclusive right interval)
+            increasing = bin_edges[0] <= bin_edges[-1]
+            bin_edges = bin_edges.astype(float)
+            bin_edges[-1] = np.nextafter(
+                bin_edges[-1], (1 if increasing else -1) * np.inf
+            )
+
+            key_on = key_on[8:] if key_on.startswith("feature.") else key_on
+
+            def color_scale_fun(x):
+                key_of_x = self._get_by_key(x, key_on)
+                if key_of_x is None:
+                    raise ValueError(f"key_on `{key_on!r}` not found in GeoJSON.")
+
+                try:
+                    value_of_x = color_data[key_of_x]
+                except KeyError:
+                    try:
+                        # try again but match str to int and vice versa
+                        if isinstance(key_of_x, int):
+                            value_of_x = color_data[str(key_of_x)]
+                        elif isinstance(key_of_x, str):
+                            value_of_x = color_data[int(key_of_x)]
+                        else:
+                            return nan_fill_color, nan_fill_opacity
+                    except (KeyError, ValueError):
+                        return nan_fill_color, nan_fill_opacity
+
+                if np.isnan(value_of_x):
+                    return nan_fill_color, nan_fill_opacity
+
+                color_idx = np.digitize(value_of_x, bin_edges, right=False) - 1
+                return color_range[color_idx], fill_opacity
+
+        else:
+
+            def color_scale_fun(x):
+                return fill_color, fill_opacity
 
         def style_function(x):
-            color, opacity = color_mapper.get_fill_color_and_opacity(x)
+            color, opacity = color_scale_fun(x)
             return {
                 "weight": line_weight,
                 "opacity": line_opacity,
@@ -1599,7 +1674,17 @@ class Choropleth(FeatureGroup):
 
     @classmethod
     def _get_by_key(cls, obj: Union[dict, list], key: str) -> Union[float, str, None]:
-        return resolve_dotted_key(obj, key, default_missing=None)
+        key_parts = key.split(".")
+        first_key_part = key_parts[0]
+        if first_key_part.isdigit():
+            value = obj[int(first_key_part)]
+        else:
+            value = obj.get(first_key_part, None)  # type: ignore
+        if len(key_parts) > 1:
+            new_key = ".".join(key_parts[1:])
+            return cls._get_by_key(value, new_key)
+        else:
+            return value
 
     def render(self, **kwargs):
         """Render the GeoJson/TopoJson and color scale objects."""

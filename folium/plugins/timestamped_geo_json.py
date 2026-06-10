@@ -80,22 +80,57 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-            L.Control.TimeDimensionCustom = L.Control.TimeDimension.extend({
-                _getDisplayDateFormat: function(date){
-                    var newdate = new moment(date);
-                    console.log(newdate)
-                    return newdate.format("{{this.date_options}}");
-                }
-            });
-            {{this._parent.get_name()}}.timeDimension = L.timeDimension(
-                {
-                    period: {{ this.period|tojson }},
-                }
-            );
-            var timeDimensionControl = new L.Control.TimeDimensionCustom(
-                {{ this.options|tojavascript }}
-            );
-            {{this._parent.get_name()}}.addControl(this.timeDimensionControl);
+            if (typeof L.Control.TimeDimensionShared === 'undefined') {
+                L.Control.TimeDimensionShared = L.Control.TimeDimension.extend({
+                    initialize: function(options) {
+                        var playerOptions = {
+                            buffer: 1,
+                            minBufferReady: -1
+                        };
+                        options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
+                        L.Control.TimeDimension.prototype.initialize.call(this, options);
+                        this._formatStrategy = options.formatStrategy || 'moment';
+                        this._formatOptions = options.formatOptions || {};
+                        this._index = options.index || null;
+                    },
+                    _getDisplayDateFormat: function(date) {
+                        if (this._formatStrategy === 'index' && this._index) {
+                            return this._index[date.getTime() - 1];
+                        } else if (this._formatStrategy === 'moment') {
+                            var fmt = this._formatOptions.dateFormat || 'YYYY-MM-DD HH:mm:ss';
+                            return new moment(date).format(fmt);
+                        }
+                        return date.toString();
+                    },
+                    setFormatStrategy: function(strategy, options) {
+                        this._formatStrategy = strategy;
+                        this._formatOptions = options || {};
+                        if (options && options.index) {
+                            this._index = options.index;
+                        }
+                    }
+                });
+            }
+
+            var map = {{this._parent.get_name()}};
+            if (!map.timeDimension) {
+                map.timeDimension = L.timeDimension(
+                    {
+                        period: {{ this.period|tojson }},
+                    }
+                );
+            }
+
+            var controlOptions = {{ this.options|tojavascript }};
+            controlOptions.formatStrategy = 'moment';
+            controlOptions.formatOptions = { dateFormat: "{{this.date_options}}" };
+            if (!map._timeDimensionControl) {
+                var timeDimensionControl = new L.Control.TimeDimensionShared(controlOptions);
+                map.addControl(timeDimensionControl);
+                map._timeDimensionControl = timeDimensionControl;
+            } else {
+                map._timeDimensionControl.setFormatStrategy('moment', {dateFormat: "{{this.date_options}}"});
+            }
 
             var geoJsonLayer = L.geoJson({{this.data}}, {
                     pointToLayer: function (feature, latLng) {

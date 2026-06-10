@@ -122,54 +122,92 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                 }
             });
 
-            L.Control.TimeDimensionCustom = L.Control.TimeDimension.extend({
-                initialize: function(index, options) {
-                    var playerOptions = {
-                        buffer: 1,
-                        minBufferReady: -1
+            if (typeof L.Control.TimeDimensionShared === 'undefined') {
+                L.Control.TimeDimensionShared = L.Control.TimeDimension.extend({
+                    initialize: function(options) {
+                        var playerOptions = {
+                            buffer: 1,
+                            minBufferReady: -1
                         };
-                    options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
-                    L.Control.TimeDimension.prototype.initialize.call(this, options);
-                    this.index = index;
-                },
-                _getDisplayDateFormat: function(date) {
-                    return this.index[date.getTime()-1];
-                }
-            });
+                        options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
+                        L.Control.TimeDimension.prototype.initialize.call(this, options);
+                        this._formatStrategy = options.formatStrategy || 'moment';
+                        this._formatOptions = options.formatOptions || {};
+                        this._index = options.index || null;
+                    },
+                    _getDisplayDateFormat: function(date) {
+                        if (this._formatStrategy === 'index' && this._index) {
+                            return this._index[date.getTime() - 1];
+                        } else if (this._formatStrategy === 'moment') {
+                            var fmt = this._formatOptions.dateFormat || 'YYYY-MM-DD HH:mm:ss';
+                            return new moment(date).format(fmt);
+                        }
+                        return date.toString();
+                    },
+                    setFormatStrategy: function(strategy, options) {
+                        this._formatStrategy = strategy;
+                        this._formatOptions = options || {};
+                        if (options && options.index) {
+                            this._index = options.index;
+                        }
+                    }
+                });
+            }
             </script>
         {% endmacro %}
 
         {% macro script(this, kwargs) %}
 
             var times = {{this.times}};
+            var map = {{this._parent.get_name()}};
 
-            {{this._parent.get_name()}}.timeDimension = L.timeDimension(
-                {times : times, currentTime: new Date(1)}
-            );
+            if (!map.timeDimension) {
+                map.timeDimension = L.timeDimension(
+                    {times : times, currentTime: new Date(1)}
+                );
+            } else {
+                var existingTimes = map.timeDimension.getAvailableTimes();
+                var newTimes = times.filter(function(t) {
+                    return existingTimes.indexOf(t) === -1;
+                });
+                if (newTimes.length > 0) {
+                    var mergedTimes = existingTimes.concat(newTimes).sort(function(a, b) {
+                        return a - b;
+                    });
+                    map.timeDimension.setAvailableTimes(mergedTimes);
+                }
+            }
 
-            var {{this._control_name}} = new L.Control.TimeDimensionCustom({{this.index}}, {
-                autoPlay: {{this.auto_play}},
-                backwardButton: {{this.backward_button}},
-                displayDate: {{this.display_index}},
-                forwardButton: {{this.forward_button}},
-                limitMinimumRange: {{this.limit_minimum_range}},
-                limitSliders: {{this.limit_sliders}},
-                loopButton: {{this.loop_button}},
-                maxSpeed: {{this.max_speed}},
-                minSpeed: {{this.min_speed}},
-                playButton: {{this.play_button}},
-                playReverseButton: {{this.play_reverse_button}},
-                position: "{{this.position}}",
-                speedSlider: {{this.speed_slider}},
-                speedStep: {{this.speed_step}},
-                styleNS: "{{this.style_NS}}",
-                timeSlider: {{this.time_slider}},
-                timeSliderDragUpdate: {{this.time_slider_drag_update}},
-                timeSteps: {{this.index_steps}}
-                })
-                .addTo({{this._parent.get_name()}});
+            if (!map._timeDimensionControl) {
+                var {{this._control_name}} = new L.Control.TimeDimensionShared({
+                    autoPlay: {{this.auto_play}},
+                    backwardButton: {{this.backward_button}},
+                    displayDate: {{this.display_index}},
+                    forwardButton: {{this.forward_button}},
+                    limitMinimumRange: {{this.limit_minimum_range}},
+                    limitSliders: {{this.limit_sliders}},
+                    loopButton: {{this.loop_button}},
+                    maxSpeed: {{this.max_speed}},
+                    minSpeed: {{this.min_speed}},
+                    playButton: {{this.play_button}},
+                    playReverseButton: {{this.play_reverse_button}},
+                    position: "{{this.position}}",
+                    speedSlider: {{this.speed_slider}},
+                    speedStep: {{this.speed_step}},
+                    styleNS: "{{this.style_NS}}",
+                    timeSlider: {{this.time_slider}},
+                    timeSliderDragUpdate: {{this.time_slider_drag_update}},
+                    timeSteps: {{this.index_steps}},
+                    formatStrategy: 'index',
+                    index: {{this.index}}
+                });
+                {{this._control_name}}.addTo(map);
+                map._timeDimensionControl = {{this._control_name}};
+            } else {
+                map._timeDimensionControl.setFormatStrategy('index', {index: {{this.index}}});
+            }
 
-                var {{this.get_name()}} = new TDHeatmap({{this.data}},
+            var {{this.get_name()}} = new TDHeatmap({{this.data}},
                 {heatmapOptions: {
                         radius: {{this.radius}},
                         blur: {{this.blur}},
