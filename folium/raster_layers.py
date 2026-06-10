@@ -15,7 +15,7 @@ from folium.utilities import (
     TypeJsonValue,
     _image_source_type,
     _is_array_like,
-    _is_renderable_image_source,
+    image_source_to_url,
     image_to_url,
     mercator_transform,
     normalize_bounds_type,
@@ -330,12 +330,6 @@ class ImageOverlay(Layer):
         self.options = remove_empty(**kwargs)
         self.pixelated = pixelated
 
-        is_renderable, reason = _is_renderable_image_source(image)
-        if not is_renderable:
-            raise ValueError(
-                f"ImageOverlay received a non-renderable image source. {reason}"
-            )
-
         source_type = _image_source_type(image)
 
         if mercator_project and source_type == "array":
@@ -346,7 +340,13 @@ class ImageOverlay(Layer):
         if source_type != "array":
             colormap = None
 
-        self.url = image_to_url(image, origin=origin, colormap=colormap)
+        self.url = image_source_to_url(
+            image,
+            require_renderable=True,
+            colormap=colormap,
+            origin=origin,
+            caller="ImageOverlay",
+        )
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """

@@ -17,6 +17,7 @@ from folium.utilities import (
     escape_double_quotes,
     get_obj_in_upper_tree,
     if_pandas_df_convert_to_numpy,
+    image_source_to_url,
     image_to_url,
     javascript_identifier_path_to_array_notation,
     normalize_bounds_type,
@@ -484,3 +485,70 @@ def test_image_to_url_data_uri_passthrough():
 def test_image_to_url_special_scheme():
     special = "blob:https://example.com/uuid"
     assert image_to_url(special) == special
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "https://example.com/img.png",
+        "data:image/png;base64,iVBORw0KGgo=",
+        _SVG_DATA,
+        _PNG_BASE64,
+    ],
+)
+def test_image_source_to_url_renderable_passes(image):
+    """Valid renderable sources should return the same URL as image_to_url()."""
+    result = image_source_to_url(image, require_renderable=True)
+    assert result == image_to_url(image)
+
+
+def test_image_source_to_url_renderable_passes_array():
+    import numpy as np
+
+    data = np.array([[[1, 0, 0, 1]]])
+    result = image_source_to_url(data, require_renderable=True)
+    assert result.startswith("data:image/png;base64,")
+
+
+def test_image_source_to_url_renderable_passes_existing_file(tmp_path):
+    f = tmp_path / "test.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    result = image_source_to_url(str(f), require_renderable=True)
+    assert result.startswith("data:image/png;base64,")
+
+
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        _JSON_OBJECT,
+        _JSON_ARRAY,
+        "plain_string_not_image",
+    ],
+)
+def test_image_source_to_url_rejects_non_renderable(bad_input):
+    with pytest.raises(ValueError):
+        image_source_to_url(bad_input, require_renderable=True)
+
+
+def test_image_source_to_url_rejects_nonexistent_pathlike():
+    from pathlib import Path
+
+    bad = Path("/definitely/not/a/real/path/nope.png")
+    with pytest.raises(ValueError, match="nonexistent"):
+        image_source_to_url(bad, require_renderable=True)
+
+
+def test_image_source_to_url_caller_in_error_message():
+    with pytest.raises(ValueError, match="ImageOverlay"):
+        image_source_to_url(
+            _JSON_OBJECT, require_renderable=True, caller="ImageOverlay"
+        )
+
+
+def test_image_source_to_url_require_renderable_false_passthrough():
+    """When require_renderable=False, behaviour matches plain image_to_url()."""
+    json_input = _JSON_OBJECT
+    result = image_source_to_url(json_input, require_renderable=False)
+    assert result == image_to_url(json_input)
+    assert result == _JSON_OBJECT
+

@@ -368,6 +368,55 @@ def image_to_url(
     return url.replace("\n", " ")
 
 
+def image_source_to_url(
+    image: Any,
+    *,
+    require_renderable: bool = True,
+    colormap: Optional[Callable] = None,
+    origin: str = "upper",
+    caller: Optional[str] = None,
+) -> str:
+    """
+    Unified entry point for image layers to convert an image source into a URL.
+
+    Combines renderability validation (optional) and URL conversion into a
+    single call so that callers cannot accidentally skip validation.
+
+    Parameters
+    ----------
+    image: string, PathLike, or array-like object
+        The image source — see image_to_url() for supported image formats.
+    require_renderable: bool, default True
+        When True, raises ValueError if ``image`` is not a source that can
+        be rendered by the browser as an <img> src (e.g. JSON strings,
+        plain text, or nonexistent PathLike objects are rejected).
+        Set to False to bypass the check and match plain image_to_url().
+    colormap: callable or None, default None
+        Forwarded to image_to_url() — only used for array-like mono images.
+    origin: {'upper', 'lower'}, default 'upper'
+        Forwarded to image_to_url().
+    caller: str or None, default None
+        If provided, used as a prefix in ValueError messages so the user
+        can tell which class rejected the input (e.g. "ImageOverlay").
+
+    Returns
+    -------
+    str
+        A URL or data URI suitable for use as an image src.
+
+    Raises
+    ------
+    ValueError
+        If require_renderable is True and the image source is not renderable.
+    """
+    if require_renderable:
+        is_valid, reason = _is_renderable_image_source(image)
+        if not is_valid:
+            prefix = f"{caller} received a non-renderable image source. " if caller else ""
+            raise ValueError(f"{prefix}{reason}")
+    return image_to_url(image, colormap=colormap, origin=origin)
+
+
 def _is_url(url: str) -> bool:
     """Check to see if `url` has a valid protocol."""
     try:

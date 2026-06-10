@@ -42,11 +42,11 @@ from folium.utilities import (
     TypeLine,
     TypePathOptions,
     TypePosition,
-    _is_renderable_image_source,
     _parse_size,
     escape_backticks,
     get_bounds,
     get_obj_in_upper_tree,
+    image_source_to_url,
     image_to_url,
     javascript_identifier_path_to_array_notation,
     none_max,
@@ -1919,24 +1919,20 @@ class CustomIcon(Icon):
     ):
         super(Icon, self).__init__()
         self._name = "icon"
-        is_renderable, reason = _is_renderable_image_source(icon_image)
-        if not is_renderable:
-            raise ValueError(
-                f"CustomIcon received a non-renderable icon_image source. {reason}"
-            )
-        if shadow_image is not None:
-            is_renderable_shadow, reason_shadow = _is_renderable_image_source(
-                shadow_image
-            )
-            if not is_renderable_shadow:
-                raise ValueError(
-                    f"CustomIcon received a non-renderable shadow_image source. {reason_shadow}"
-                )
         self.options = remove_empty(
-            icon_url=image_to_url(icon_image),
+            icon_url=image_source_to_url(
+                icon_image, require_renderable=True, caller="CustomIcon"
+            ),
             icon_size=icon_size,
             icon_anchor=icon_anchor,
-            shadow_url=shadow_image and image_to_url(shadow_image),
+            shadow_url=(
+                shadow_image
+                and image_source_to_url(
+                    shadow_image,
+                    require_renderable=True,
+                    caller="CustomIcon (shadow_image)",
+                )
+            ),
             shadow_size=shadow_size,
             shadow_anchor=shadow_anchor,
             popup_anchor=popup_anchor,
