@@ -555,6 +555,12 @@ class EventMixin:
     same internal ``_event_handlers`` dictionary, so there is only one
     rendering path for all event bindings.
 
+    For simple layers (Circle, Polygon, etc.) there is only one event
+    level, so ``events`` is unambiguous. For GeoJson, which has two
+    levels (feature-level and layer-level), use the explicit
+    ``feature_events`` and ``layer_events`` parameters instead of
+    ``events`` to avoid confusion about which binding level is intended.
+
     Examples
     --------
     >>> class MyLayer(EventMixin, MacroElement):
@@ -681,8 +687,9 @@ class EventMixin:
         event_name = event_handler.event
         if event_name in self._event_handlers:
             import warnings
+            source = "feature_events" if hasattr(self, "_layer_event_handlers") else "events"
             warnings.warn(
-                f"Event '{event_name}' already set via `events` parameter. "
+                f"Event '{event_name}' already set via `{source}` parameter. "
                 f"The add_child(EventHandler(...)) call for the same event "
                 f"is ignored to avoid duplicate bindings.",
                 UserWarning,

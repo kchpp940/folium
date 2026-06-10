@@ -320,7 +320,7 @@ class TestGeoJsonFeatureEvents:
         """Test feature-level click event."""
         g = GeoJson(
             sample_geojson,
-            events={"click": "alert"},
+            feature_events={"click": "alert"},
         )
         # Need parent_map context for full render
         import folium
@@ -336,7 +336,7 @@ class TestGeoJsonFeatureEvents:
         """Test multiple feature-level events."""
         g = GeoJson(
             sample_geojson,
-            events={
+            feature_events={
                 "click": "alert",
                 "mouseover": "highlight",
                 "mouseout": "reset_highlight",
@@ -410,7 +410,7 @@ class TestGeoJsonLayerEvents:
         m = folium.Map(location=[0.0, 100.0], zoom_start=8)
         g = GeoJson(
             feature_data,
-            events={"click": "alert"},
+            feature_events={"click": "alert"},
             layer_events={"layeradd": "log"},
         )
         g.add_to(m)
@@ -513,7 +513,7 @@ class TestBackwardCompatibility:
         g = GeoJson(
             feature_data,
             on_each_feature=on_each,
-            events={"click": "alert"},  # New system alongside old
+            feature_events={"click": "alert"},
         )
         import folium
         m = folium.Map(location=[0, 0], zoom_start=8)
@@ -539,7 +539,7 @@ class TestBackwardCompatibility:
         g = GeoJson(
             feature_data,
             highlight_function=highlight_func,
-            events={"click": "log"},
+            feature_events={"click": "log"},
         )
         import folium
         m = folium.Map(location=[0.5, 0.5], zoom_start=8)
@@ -665,3 +665,71 @@ class TestEventHandlerAbsorption:
 
         html = m._repr_html_()
         assert "via_on_test" in html, "Evented.on() handler should be in HTML"
+
+
+class TestGeoJsonExplicitEventParams:
+    """Tests for GeoJson feature_events / layer_events / events alias."""
+
+    def test_events_alias_routes_to_feature_events(self):
+        """Test that `events=` alias routes to feature-level events."""
+        feature_data = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {},
+            }],
+        }
+        g = GeoJson(feature_data, events={"click": "alert"})
+        assert g.has_events(), "events= should set feature-level events"
+        assert not g.has_layer_events(), "events= should NOT set layer-level events"
+
+    def test_feature_events_explicit(self):
+        """Test that `feature_events=` explicitly sets feature-level events."""
+        feature_data = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {},
+            }],
+        }
+        g = GeoJson(feature_data, feature_events={"click": "alert"})
+        assert g.has_events(), "feature_events= should set feature-level events"
+        assert not g.has_layer_events(), "feature_events= should NOT set layer-level events"
+
+    def test_events_and_feature_events_conflict_raises(self):
+        """Test that providing both `events` and `feature_events` raises ValueError."""
+        feature_data = {"type": "Point", "coordinates": [0, 0]}
+        with pytest.raises(ValueError, match="both `events` and `feature_events`"):
+            GeoJson(
+                feature_data,
+                events={"click": "alert"},
+                feature_events={"click": "log"},
+            )
+
+    def test_events_alias_renders_same_as_feature_events(self):
+        """Test that `events=` and `feature_events=` produce identical output."""
+        feature_data = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {},
+            }],
+        }
+        g1 = GeoJson(feature_data, events={"click": "alert"})
+        g2 = GeoJson(feature_data, feature_events={"click": "alert"})
+
+        import folium
+        m1 = folium.Map(location=[0, 0], zoom_start=8)
+        m2 = folium.Map(location=[0, 0], zoom_start=8)
+        g1.add_to(m1)
+        g2.add_to(m2)
+        m1._repr_html_()
+        m2._repr_html_()
+
+        r1 = g1._template.module.script(g1)
+        r2 = g2._template.module.script(g2)
+        assert '"click": ' in r1
+        assert '"click": ' in r2

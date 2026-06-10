@@ -529,9 +529,10 @@ class GeoJson(EventMixin, Layer):
         Javascript code to be called on each feature.
         See https://leafletjs.com/examples/geojson/
         `onEachFeature` for more information.
-    events: dict, default None
+    feature_events: dict, default None
         Dictionary mapping event names to event handlers. These events are
-        bound to **individual feature layers** (via onEachFeature).
+        bound to **individual feature layers** inside the onEachFeature
+        callback, so each GeoJSON feature gets its own event handler.
         Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
         Values can be:
         - Global JS function name (str)
@@ -541,8 +542,11 @@ class GeoJson(EventMixin, Layer):
     layer_events: dict, default None
         Dictionary mapping event names to event handlers. These events are
         bound to the **GeoJson layer as a whole** (not individual features).
-        Same format as `events` parameter.
+        Same format as `feature_events` parameter.
         Useful for layer-level events like 'layeradd', 'layerremove', etc.
+    events: dict, default None
+        Backward-compatible alias for `feature_events`. If both `events`
+        and `feature_events` are provided, a ``ValueError`` is raised.
     **kwargs
         Keyword arguments are passed to the geoJson object as extra options.
 
@@ -566,12 +570,12 @@ class GeoJson(EventMixin, Layer):
     >>> GeoJson(geojson, style_function=style_function)
 
     >>> # Bind feature-level click events with predefined action
-    >>> GeoJson(geojson, events={"click": "alert"})
+    >>> GeoJson(geojson, feature_events={"click": "alert"})
 
     >>> # Bind both feature-level and layer-level events
     >>> GeoJson(
     ...     geojson,
-    ...     events={
+    ...     feature_events={
     ...         "click": "function(e) { console.log(e.target.feature); }",
     ...         "mouseover": "highlight",
     ...         "mouseout": "reset_highlight",
@@ -736,12 +740,22 @@ class GeoJson(EventMixin, Layer):
         zoom_on_click: bool = False,
         on_each_feature: Optional[JsCode] = None,
         marker: Union[Circle, CircleMarker, Marker, None] = None,
-        events: Optional[TypeEventHandlers] = None,
+        feature_events: Optional[TypeEventHandlers] = None,
         layer_events: Optional[TypeEventHandlers] = None,
+        events: Optional[TypeEventHandlers] = None,
         **kwargs: Any,
     ):
+        if events is not None and feature_events is not None:
+            raise ValueError(
+                "GeoJson received both `events` and `feature_events`. "
+                "The `events` parameter is a backward-compatible alias for "
+                "`feature_events`; use only `feature_events` (for per-feature "
+                "handlers) and `layer_events` (for whole-layer handlers) to "
+                "avoid ambiguity."
+            )
+        resolved_feature_events = feature_events if feature_events is not None else events
         super().__init__(
-            events=events,
+            events=resolved_feature_events,
             name=name,
             overlay=overlay,
             control=control,
@@ -813,7 +827,7 @@ class GeoJson(EventMixin, Layer):
         event_name : str
             Name of the event (e.g., 'layeradd', 'layerremove').
         handler : str, JsCode
-            The event handler to bind. Same format as `events` parameter.
+            The event handler to bind. Same format as `feature_events` parameter.
         """
         self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
 
@@ -855,9 +869,10 @@ class GeoJson(EventMixin, Layer):
         original ``add_child(EventHandler(...))`` behavior where the
         handler was rendered as ``{parent_name}.on(...)``.
 
-        If a feature-level event with the same name already exists in
-        ``_event_handlers`` (set via the ``events`` parameter), a
-        warning is issued and the ``EventHandler`` is ignored.
+        If an event with the same name already exists in
+        ``_layer_event_handlers`` or ``_event_handlers`` (set via
+        ``feature_events`` / ``layer_events``), a warning is issued
+        and the ``EventHandler`` is ignored.
         """
         from folium.elements import EventHandler as _LegacyEventHandler
 
@@ -867,9 +882,9 @@ class GeoJson(EventMixin, Layer):
         if event_name in self._layer_event_handlers or event_name in self._event_handlers:
             import warnings
             warnings.warn(
-                f"Event '{event_name}' already set via `events` or `layer_events` "
-                f"parameter. The add_child(EventHandler(...)) call for the same "
-                f"event is ignored to avoid duplicate bindings.",
+                f"Event '{event_name}' already set via `feature_events` or "
+                f"`layer_events` parameter. The add_child(EventHandler(...)) "
+                f"call for the same event is ignored to avoid duplicate bindings.",
                 UserWarning,
                 stacklevel=4,
             )
