@@ -14,7 +14,6 @@ from typing import (
     get_args,
 )
 
-import numpy as np
 import requests
 from branca.colormap import ColorMap, LinearColormap, StepColormap
 from branca.element import (
@@ -28,6 +27,7 @@ from branca.element import (
 )
 from branca.utilities import color_brewer
 
+from folium._choropleth import ChoroplethColorMapper
 from folium._data_binding import ChoroplethDataBinder
 from folium._geojson_utils import get_feature_id, resolve_dotted_key
 from folium.elements import JSCSSMixin
@@ -1552,60 +1552,21 @@ class Choropleth(FeatureGroup):
 
         data_binder = ChoroplethDataBinder(data, columns)
 
-        self.color_scale = None
-
-        if data_binder.has_data() and key_on is not None:
-            real_values = data_binder.get_valid_numeric_values()
-
-            if len(real_values) == 0:
-
-                def color_scale_fun(x):
-                    return nan_fill_color, nan_fill_opacity
-
-            else:
-                bin_edges = data_binder.compute_bins(bins, use_jenks)
-
-                bins_min, bins_max = min(bin_edges), max(bin_edges)
-
-                nb_bins = len(bin_edges) - 1
-                color_range = color_brewer(fill_color, n=nb_bins)
-                self.color_scale = StepColormap(
-                    color_range,
-                    index=list(bin_edges),
-                    vmin=bins_min,
-                    vmax=bins_max,
-                    caption=legend_name,
-                )
-
-                increasing = bin_edges[0] <= bin_edges[-1]
-                bin_edges = bin_edges.astype(float)
-                bin_edges[-1] = np.nextafter(
-                    bin_edges[-1], (1 if increasing else -1) * np.inf
-                )
-
-                key_on = key_on[8:] if key_on.startswith("feature.") else key_on
-
-                def color_scale_fun(x):
-                    key_of_x = self._get_by_key(x, key_on)
-                    if key_of_x is None:
-                        raise ValueError(
-                            f"key_on `{key_on!r}` not found in GeoJSON."
-                        )
-
-                    value_float = data_binder.get_value_for_coloring(key_of_x)
-                    if value_float is None:
-                        return nan_fill_color, nan_fill_opacity
-
-                    color_idx = np.digitize(value_float, bin_edges, right=False) - 1
-                    return color_range[color_idx], fill_opacity
-
-        else:
-
-            def color_scale_fun(x):
-                return fill_color, fill_opacity
+        color_mapper = ChoroplethColorMapper(
+            data_binder,
+            key_on,
+            fill_color=fill_color,
+            nan_fill_color=nan_fill_color,
+            fill_opacity=fill_opacity,
+            nan_fill_opacity=nan_fill_opacity,
+            bins=bins,
+            use_jenks=use_jenks,
+            legend_name=legend_name,
+        )
+        self.color_scale = color_mapper.color_scale
 
         def style_function(x):
-            color, opacity = color_scale_fun(x)
+            color, opacity = color_mapper.get_fill_color_and_opacity(x)
             return {
                 "weight": line_weight,
                 "opacity": line_opacity,
