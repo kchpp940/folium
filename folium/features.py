@@ -30,6 +30,7 @@ from branca.element import (
 )
 from branca.utilities import color_brewer
 
+from folium._data_binding import ChoroplethDataBinder
 from folium.elements import JSCSSMixin
 from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
@@ -1385,175 +1386,6 @@ class GeoJsonPopup(GeoJsonDetail):
         self.popup_options = kwargs
 
 
-class _ChoroplethDataBinder:
-    def __init__(
-        self,
-        data: Any,
-        columns: Optional[Sequence[Any]] = None,
-    ):
-        self._color_data: Optional[dict] = None
-        self._valid_values: Optional[np.ndarray] = None
-        self._build(data, columns)
-
-    @staticmethod
-    def _lazy_pd():
-        try:
-            import pandas as pd
-            return pd
-        except ImportError:
-            return None
-
-    @staticmethod
-    def _is_missing_value(value: Any) -> bool:
-        if value is None:
-            return True
-        try:
-            if np.isnan(value):
-                return True
-        except (TypeError, ValueError):
-            pass
-        pd = _ChoroplethDataBinder._lazy_pd()
-        if pd is not None:
-            try:
-                if pd.isna(value):
-                    return True
-            except (TypeError, ValueError):
-                pass
-        return False
-
-    @staticmethod
-    def is_invalid_value(value: Any) -> bool:
-        if _ChoroplethDataBinder._is_missing_value(value):
-            return True
-        try:
-            if np.isinf(value):
-                return True
-        except (TypeError, ValueError):
-            pass
-        return False
-
-    @staticmethod
-    def _is_dataframe(data: Any) -> bool:
-        return hasattr(data, "set_index") and hasattr(data, "to_dict")
-
-    @staticmethod
-    def _is_series(data: Any) -> bool:
-        return hasattr(data, "to_dict") and not hasattr(data, "set_index")
-
-    def _build(
-        self,
-        data: Any,
-        columns: Optional[Sequence[Any]] = None,
-    ) -> None:
-        if data is None:
-            self._color_data = None
-            return
-
-        if self._is_dataframe(data) and columns is not None:
-            self._color_data = data.set_index(columns[0])[columns[1]].to_dict()
-        elif self._is_series(data):
-            self._color_data = data.to_dict()
-        elif data:
-            self._color_data = dict(data)
-        else:
-            self._color_data = None
-
-    def get_color_data(self) -> Optional[dict]:
-        return self._color_data
-
-    def get_valid_numeric_values(self) -> np.ndarray:
-        if self._valid_values is not None:
-            return self._valid_values
-
-        values: list[float] = []
-        if self._color_data is None:
-            self._valid_values = np.array([], dtype=float)
-            return self._valid_values
-
-        for v in self._color_data.values():
-            if not self.is_invalid_value(v):
-                try:
-                    values.append(float(v))
-                except (TypeError, ValueError):
-                    pass
-
-        self._valid_values = np.array(values, dtype=float)
-        return self._valid_values
-
-    def lookup_value(self, key: Any) -> Any:
-        if self._color_data is None:
-            raise KeyError(key)
-
-        if key in self._color_data:
-            return self._color_data[key]
-
-        if isinstance(key, int):
-            str_key = str(key)
-            if str_key in self._color_data:
-                return self._color_data[str_key]
-
-        if isinstance(key, str):
-            try:
-                int_key = int(key)
-                if int_key in self._color_data:
-                    return self._color_data[int_key]
-            except (ValueError, TypeError):
-                pass
-
-        raise KeyError(key)
-
-    def has_data(self) -> bool:
-        return self._color_data is not None
-
-    def compute_bins(
-        self,
-        bins: Union[int, Sequence[float]],
-        use_jenks: bool = False,
-    ) -> np.ndarray:
-        real_values = self.get_valid_numeric_values()
-
-        if len(real_values) == 0:
-            raise ValueError("No valid numeric values available for binning.")
-
-        if use_jenks:
-            from jenkspy import jenks_breaks
-
-            if not isinstance(bins, int):
-                raise ValueError(
-                    f"bins value must be an integer when using Jenks."
-                    f' Invalid value "{bins}" received.'
-                )
-            bin_edges = np.array(
-                jenks_breaks(real_values, bins), dtype=float
-            )
-        else:
-            _, bin_edges = np.histogram(real_values, bins=bins)
-
-        bins_min, bins_max = min(bin_edges), max(bin_edges)
-        if np.any((real_values < bins_min) | (real_values > bins_max)):
-            raise ValueError(
-                "All values are expected to fall into one of the provided "
-                "bins (or to be Nan). Please check the `bins` parameter "
-                "and/or your data."
-            )
-
-        return bin_edges
-
-    def get_value_for_coloring(self, key: Any) -> Optional[float]:
-        try:
-            raw_value = self.lookup_value(key)
-        except KeyError:
-            return None
-
-        if self.is_invalid_value(raw_value):
-            return None
-
-        try:
-            return float(raw_value)
-        except (TypeError, ValueError):
-            return None
-
-
 class Choropleth(FeatureGroup):
     """
     Apply a GeoJSON overlay to the map.
@@ -1720,7 +1552,7 @@ class Choropleth(FeatureGroup):
                 DeprecationWarning,
             )
 
-        data_binder = _ChoroplethDataBinder(data, columns)
+        data_binder = ChoroplethDataBinder(data, columns)
 
         self.color_scale = None
 
