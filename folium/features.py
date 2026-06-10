@@ -3,8 +3,9 @@ Leaflet GeoJson and miscellaneous features.
 
 """
 
-import copy
+import functools
 import json
+import operator
 import warnings
 from collections.abc import Iterable, Sequence
 from typing import (
@@ -16,6 +17,7 @@ from typing import (
 )
 
 import numpy as np
+import pandas as pd
 import requests
 from branca.colormap import ColorMap, LinearColormap, StepColormap
 from branca.element import (
@@ -29,7 +31,6 @@ from branca.element import (
 )
 from branca.utilities import color_brewer
 
-from folium import _geojson_utils
 from folium.elements import JSCSSMixin
 from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
@@ -651,12 +652,6 @@ class GeoJson(Layer):
         });
 
         function {{ this.get_name() }}_add (data) {
-            {%- if this._feature_id_map %}
-            var _fid = {{ this._feature_id_map|tojson }};
-            for (var _i = 0; _i < _fid.length; _i++) {
-                data.features[_i]._folium_id = _fid[_i];
-            }
-            {%- endif %}
             {{ this.get_name() }}
                 .addData(data);
         }
@@ -721,15 +716,8 @@ class GeoJson(Layer):
 
         self.data = self.process_data(data)
 
-        self._feature_id_map: list[str | int] | None = None
-
         if self.style or self.highlight:
-            if not self.embed:
-                raise ValueError(
-                    "style_function and highlight_function require "
-                    "`embed=True` because the data needs to be processed."
-                )
-            _geojson_utils.to_feature_collection(self.data)
+            self.convert_to_feature_collection()
             if style_function is not None:
                 self._validate_function(style_function, "style_function")
                 self.style_function = style_function
@@ -738,10 +726,7 @@ class GeoJson(Layer):
                 self._validate_function(highlight_function, "highlight_function")
                 self.highlight_function = highlight_function
                 self.highlight_map: dict = {}
-            (
-                self.feature_identifier,
-                self._feature_id_map,
-            ) = _geojson_utils.resolve_feature_identifier(self.data)
+            self.feature_identifier = self.find_identifier()
 
         if isinstance(tooltip, (GeoJsonTooltip, Tooltip)):
             self.add_child(tooltip)
@@ -754,16 +739,16 @@ class GeoJson(Layer):
         """Convert an unknown data input into a geojson dictionary."""
         if isinstance(data, dict):
             self.embed = True
-            return copy.deepcopy(data)
+            return data
         elif isinstance(data, str):
             if data.lower().startswith(("http:", "ftp:", "https:")):
                 if not self.embed:
                     self.embed_link = data
                 return self.get_geojson_from_web(data)
-            elif data.lstrip()[0] in "[{":
+            elif data.lstrip()[0] in "[{":  # This is a GeoJSON inline string
                 self.embed = True
                 return json.loads(data)
-            else:
+            else:  # This is a filename
                 if not self.embed:
                     self.embed_link = data
                 with open(data) as f:
@@ -782,42 +767,29 @@ class GeoJson(Layer):
         return requests.get(url).json()
 
     def convert_to_feature_collection(self) -> None:
-        """Convert data into a FeatureCollection if it is not already.
-
-        .. deprecated::
-            This method is kept for backward compatibility. The
-            conversion now happens automatically when a
-            FeatureCollection is needed (e.g. style/highlight).
-            This method runs the full pipeline: properties
-            normalization → FC conversion → identifier resolution.
-        """
-        if self.embed:
-            _geojson_utils.to_feature_collection(self.data)
-            identifier, id_map = _geojson_utils.resolve_feature_identifier(self.data)
-            self.feature_identifier = identifier
-            self._feature_id_map = id_map
-
-    def find_identifier(self) -> str:
-        """Find a unique identifier for each feature, create it if needed.
-
-        .. deprecated::
-            This method is kept for backward compatibility. Identifier
-            resolution now happens automatically during ``__init__``
-            when style/highlight is used. This method runs the full
-            pipeline and returns the identifier string.
-        """
-        if self.embed:
-            identifier, id_map = _geojson_utils.resolve_feature_identifier(self.data)
-            self.feature_identifier = identifier
-            self._feature_id_map = id_map
-            return identifier
-        return "feature.id"
+        """Convert data into a FeatureCollection if it is not already."""
+        if self.data["type"] == "FeatureCollection":
+            return
+        if not self.embed:
+            raise ValueError(
+                "Data is not a FeatureCollection, but it should be to apply "
+                "style or highlight. Because `embed=False` it cannot be "
+                "converted into one.\nEither change your geojson data to a "
+                "FeatureCollection, set `embed=True` or disable styling."
+            )
+        # Catch case when GeoJSON is just a single Feature or a geometry.
+        if "geometry" not in self.data.keys():
+            # Catch case when GeoJSON is just a geometry.
+            self.data = {"type": "Feature", "geometry": self.data}
+        self.data = {"type": "FeatureCollection", "features": [self.data]}
 
     def _validate_function(self, func: Callable, name: str) -> None:
         """
         Tests `self.style_function` and `self.highlight_function` to ensure
         they are functions returning dictionaries.
         """
+        # If for some reason there are no features (e.g., empty API response)
+        # don't attempt validation
         if not self.data["features"]:
             return
 
@@ -828,6 +800,41 @@ class GeoJson(Layer):
                 "data['features'] and returns a dictionary."
             )
 
+    def find_identifier(self) -> str:
+        """Find a unique identifier for each feature, create it if needed.
+
+        According to the GeoJSON specs a feature:
+         - MAY have an 'id' field with a string or numerical value.
+         - MUST have a 'properties' field. The content can be any json object
+           or even null.
+
+        """
+        feats = self.data["features"]
+        # Each feature has an 'id' field with a unique value.
+        unique_ids = {feat.get("id", None) for feat in feats}
+        if None not in unique_ids and len(unique_ids) == len(feats):
+            return "feature.id"
+        # Each feature has a unique string or int property.
+        if all(isinstance(feat.get("properties", None), dict) for feat in feats):
+            for key in feats[0]["properties"]:
+                unique_values = {
+                    feat["properties"].get(key, None)
+                    for feat in feats
+                    if isinstance(feat["properties"].get(key, None), (str, int))
+                }
+                if len(unique_values) == len(feats):
+                    return f"feature.properties.{key}"
+        # We add an 'id' field with a unique value to the data.
+        if self.embed:
+            for i, feature in enumerate(feats):
+                feature["id"] = str(i)
+            return "feature.id"
+        raise ValueError(
+            "There is no unique identifier for each feature and because "
+            "`embed=False` it cannot be added. Consider adding an `id` "
+            "field to your geojson data or set `embed=True`. "
+        )
+
     def _get_self_bounds(self) -> list[list[Optional[float]]]:
         """
         Computes the bounds of the object itself (not including it's children)
@@ -836,41 +843,11 @@ class GeoJson(Layer):
         """
         return get_bounds(self.data, lonlat=True)
 
-    def get_feature_id(self, feature: dict) -> Union[str, int]:
-        """Return the unique identifier for a feature.
-
-        The identifier is resolved using the same logic that generates
-        the Javascript expression used in the rendered template, so the
-        Python and Javascript sides always agree on how to identify a
-        feature.
-
-        Parameters
-        ----------
-        feature: dict
-            A GeoJSON Feature dictionary from the normalized internal
-            data copy.
-
-        Returns
-        -------
-        str or int
-            The feature's unique identifier.
-        """
-        identifier = getattr(self, "feature_identifier", "feature.id")
-        feature_id_map = getattr(self, "_feature_id_map", None)
-        feature_index = None
-        if feature_id_map is not None and self.data.get("type") == "FeatureCollection":
-            try:
-                feature_index = self.data["features"].index(feature)
-            except ValueError:
-                pass
-        return _geojson_utils.get_feature_id(
-            feature, identifier, feature_id_map=feature_id_map, feature_index=feature_index
-        )
-
     def render(self, **kwargs):
         self.parent_map = get_obj_in_upper_tree(self, Map)
+        # Need at least one feature, otherwise style mapping fails
         if (self.style or self.highlight) and self.data["features"]:
-            mapper = GeoJsonStyleMapper(self)
+            mapper = GeoJsonStyleMapper(self.data, self.feature_identifier, self)
             if self.style:
                 self.style_map = mapper.get_style_map(self.style_function)
             if self.highlight:
@@ -878,38 +855,72 @@ class GeoJson(Layer):
         super().render()
 
 
+TypeStyleMapping = dict[str, Union[str, list[Union[str, int]]]]
+
+
 class GeoJsonStyleMapper:
     """Create dicts that map styling to GeoJson features.
-
-    Thin wrapper around :func:`folium._geojson_utils.build_style_mapping`
-    that keeps the :class:`GeoJson` instance as the MacroElement parent.
 
     :meta private:
     """
 
-    def __init__(self, geojson_obj: GeoJson):
+    def __init__(
+        self,
+        data: dict,
+        feature_identifier: str,
+        geojson_obj: GeoJson,
+    ):
+        self.data = data
+        self.feature_identifier = feature_identifier
         self.geojson_obj = geojson_obj
 
-    def get_style_map(self, style_function: Callable) -> _geojson_utils.TypeStyleMapping:
+    def get_style_map(self, style_function: Callable) -> TypeStyleMapping:
         """Return a dict that maps style parameters to features."""
-        return _geojson_utils.build_style_mapping(
-            self.geojson_obj.data["features"],
-            self.geojson_obj.feature_identifier,
-            style_function,
-            macro_element_parent=self.geojson_obj,
-            feature_id_map=self.geojson_obj._feature_id_map,
-        )
+        return self._create_mapping(style_function, "style")
 
-    def get_highlight_map(
-        self, highlight_function: Callable
-    ) -> _geojson_utils.TypeStyleMapping:
+    def get_highlight_map(self, highlight_function: Callable) -> TypeStyleMapping:
         """Return a dict that maps highlight parameters to features."""
-        return _geojson_utils.build_style_mapping(
-            self.geojson_obj.data["features"],
-            self.geojson_obj.feature_identifier,
-            highlight_function,
-            feature_id_map=self.geojson_obj._feature_id_map,
-        )
+        return self._create_mapping(highlight_function, "highlight")
+
+    def _create_mapping(self, func: Callable, switch: str) -> TypeStyleMapping:
+        """Internal function to create the mapping."""
+        mapping: TypeStyleMapping = {}
+        for feature in self.data["features"]:
+            content = func(feature)
+            if switch == "style":
+                for key, value in content.items():
+                    if isinstance(value, MacroElement):
+                        # Make sure objects are rendered:
+                        if value._parent is None:
+                            value._parent = self.geojson_obj
+                            value.render()
+                        # Replace objects with their Javascript var names:
+                        content[key] = "{{'" + value.get_name() + "'}}"
+            key = self._to_key(content)
+            feature_id = self.get_feature_id(feature)
+            mapping.setdefault(key, []).append(feature_id)  # type: ignore
+        self._set_default_key(mapping)
+        return mapping
+
+    def get_feature_id(self, feature: dict) -> Union[str, int]:
+        """Return a value identifying the feature."""
+        fields = self.feature_identifier.split(".")[1:]
+        value = functools.reduce(operator.getitem, fields, feature)
+        assert isinstance(value, (str, int))
+        return value
+
+    @staticmethod
+    def _to_key(d: dict) -> str:
+        """Convert dict to str and enable Jinja2 template syntax."""
+        as_str = json.dumps(d, sort_keys=True)
+        return as_str.replace('"{{', "{{").replace('}}"', "}}")
+
+    @staticmethod
+    def _set_default_key(mapping: TypeStyleMapping) -> None:
+        """Replace the field with the most features with a 'default' field."""
+        key_longest = max(mapping, key=mapping.get)  # type: ignore
+        mapping["default"] = key_longest
+        del mapping[key_longest]
 
 
 class TopoJson(JSCSSMixin, Layer):
@@ -1015,7 +1026,7 @@ class TopoJson(JSCSSMixin, Layer):
             self.data = json.load(data)
         elif type(data) is dict:
             self.embed = True
-            self.data = copy.deepcopy(data)
+            self.data = data
         else:
             self.embed = False
             self.data = data
@@ -1183,8 +1194,6 @@ class GeoJsonDetail(MacroElement):
         """Renders the HTML representation of the element."""
         figure = self.get_root()
         if isinstance(self._parent, GeoJson):
-            if self._parent.embed:
-                _geojson_utils.to_feature_collection(self._parent.data)
             keys = tuple(
                 self._parent.data["features"][0]["properties"].keys()
                 if self._parent.data["features"]
@@ -1377,6 +1386,80 @@ class GeoJsonPopup(GeoJsonDetail):
         self.popup_options = kwargs
 
 
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        if np.isnan(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def _is_invalid_value(value: Any) -> bool:
+    if _is_missing_value(value):
+        return True
+    try:
+        if np.isinf(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def _lookup_color_value(color_data: dict, key: Any) -> Any:
+    if key in color_data:
+        return color_data[key]
+    if isinstance(key, int):
+        str_key = str(key)
+        if str_key in color_data:
+            return color_data[str_key]
+    if isinstance(key, str):
+        try:
+            int_key = int(key)
+            if int_key in color_data:
+                return color_data[int_key]
+        except (ValueError, TypeError):
+            pass
+    raise KeyError(key)
+
+
+def _prepare_color_data(
+    data: Any,
+    columns: Optional[Sequence[Any]] = None,
+) -> Optional[dict]:
+    if data is None:
+        return None
+
+    if hasattr(data, "set_index") and columns is not None:
+        color_data = data.set_index(columns[0])[columns[1]].to_dict()
+    elif hasattr(data, "to_dict"):
+        color_data = data.to_dict()
+    elif data:
+        color_data = dict(data)
+    else:
+        color_data = None
+
+    return color_data
+
+
+def _get_valid_numeric_values(color_data: dict) -> np.ndarray:
+    values = []
+    for v in color_data.values():
+        if not _is_invalid_value(v):
+            try:
+                values.append(float(v))
+            except (TypeError, ValueError):
+                pass
+    return np.array(values, dtype=float)
+
+
 class Choropleth(FeatureGroup):
     """
     Apply a GeoJSON overlay to the map.
@@ -1543,89 +1626,81 @@ class Choropleth(FeatureGroup):
                 DeprecationWarning,
             )
 
-        # Create color_data dict
-        if hasattr(data, "set_index"):
-            # This is a pd.DataFrame
-            assert columns is not None
-            color_data = data.set_index(columns[0])[columns[1]].to_dict()  # type: ignore
-        elif hasattr(data, "to_dict"):
-            # This is a pd.Series
-            color_data = data.to_dict()  # type: ignore
-        elif data:
-            color_data = dict(data)
-        else:
-            color_data = None
+        color_data = _prepare_color_data(data, columns)
 
         self.color_scale = None
 
         if color_data is not None and key_on is not None:
-            real_values = np.array(list(color_data.values()))
-            real_values = real_values[~np.isnan(real_values)]
-            if use_jenks:
-                from jenkspy import jenks_breaks
+            real_values = _get_valid_numeric_values(color_data)
 
-                if not isinstance(bins, int):
-                    raise ValueError(
-                        f"bins value must be an integer when using Jenks."
-                        f' Invalid value "{bins}" received.'
-                    )
-                bin_edges = np.array(jenks_breaks(real_values, bins), dtype=float)
-            else:
-                _, bin_edges = np.histogram(real_values, bins=bins)
+            if len(real_values) == 0:
 
-            bins_min, bins_max = min(bin_edges), max(bin_edges)
-            if np.any((real_values < bins_min) | (real_values > bins_max)):
-                raise ValueError(
-                    "All values are expected to fall into one of the provided "
-                    "bins (or to be Nan). Please check the `bins` parameter "
-                    "and/or your data."
-                )
-
-            # We add the colorscale
-            nb_bins = len(bin_edges) - 1
-            color_range = color_brewer(fill_color, n=nb_bins)
-            self.color_scale = StepColormap(
-                color_range,
-                index=list(bin_edges),
-                vmin=bins_min,
-                vmax=bins_max,
-                caption=legend_name,
-            )
-
-            # then we 'correct' the last edge for numpy digitize
-            # (we add a very small amount to fake an inclusive right interval)
-            increasing = bin_edges[0] <= bin_edges[-1]
-            bin_edges = bin_edges.astype(float)
-            bin_edges[-1] = np.nextafter(
-                bin_edges[-1], (1 if increasing else -1) * np.inf
-            )
-
-            key_on = key_on[8:] if key_on.startswith("feature.") else key_on
-
-            def color_scale_fun(x):
-                key_of_x = _geojson_utils.get_by_key(x, key_on)
-                if key_of_x is None:
-                    raise ValueError(f"key_on `{key_on!r}` not found in GeoJSON.")
-
-                try:
-                    value_of_x = color_data[key_of_x]
-                except KeyError:
-                    try:
-                        # try again but match str to int and vice versa
-                        if isinstance(key_of_x, int):
-                            value_of_x = color_data[str(key_of_x)]
-                        elif isinstance(key_of_x, str):
-                            value_of_x = color_data[int(key_of_x)]
-                        else:
-                            return nan_fill_color, nan_fill_opacity
-                    except (KeyError, ValueError):
-                        return nan_fill_color, nan_fill_opacity
-
-                if np.isnan(value_of_x):
+                def color_scale_fun(x):
                     return nan_fill_color, nan_fill_opacity
 
-                color_idx = np.digitize(value_of_x, bin_edges, right=False) - 1
-                return color_range[color_idx], fill_opacity
+            else:
+                if use_jenks:
+                    from jenkspy import jenks_breaks
+
+                    if not isinstance(bins, int):
+                        raise ValueError(
+                            f"bins value must be an integer when using Jenks."
+                            f' Invalid value "{bins}" received.'
+                        )
+                    bin_edges = np.array(
+                        jenks_breaks(real_values, bins), dtype=float
+                    )
+                else:
+                    _, bin_edges = np.histogram(real_values, bins=bins)
+
+                bins_min, bins_max = min(bin_edges), max(bin_edges)
+                if np.any((real_values < bins_min) | (real_values > bins_max)):
+                    raise ValueError(
+                        "All values are expected to fall into one of the provided "
+                        "bins (or to be Nan). Please check the `bins` parameter "
+                        "and/or your data."
+                    )
+
+                nb_bins = len(bin_edges) - 1
+                color_range = color_brewer(fill_color, n=nb_bins)
+                self.color_scale = StepColormap(
+                    color_range,
+                    index=list(bin_edges),
+                    vmin=bins_min,
+                    vmax=bins_max,
+                    caption=legend_name,
+                )
+
+                increasing = bin_edges[0] <= bin_edges[-1]
+                bin_edges = bin_edges.astype(float)
+                bin_edges[-1] = np.nextafter(
+                    bin_edges[-1], (1 if increasing else -1) * np.inf
+                )
+
+                key_on = key_on[8:] if key_on.startswith("feature.") else key_on
+
+                def color_scale_fun(x):
+                    key_of_x = self._get_by_key(x, key_on)
+                    if key_of_x is None:
+                        raise ValueError(
+                            f"key_on `{key_on!r}` not found in GeoJSON."
+                        )
+
+                    try:
+                        value_of_x = _lookup_color_value(color_data, key_of_x)
+                    except KeyError:
+                        return nan_fill_color, nan_fill_opacity
+
+                    if _is_invalid_value(value_of_x):
+                        return nan_fill_color, nan_fill_opacity
+
+                    try:
+                        value_float = float(value_of_x)
+                    except (TypeError, ValueError):
+                        return nan_fill_color, nan_fill_opacity
+
+                    color_idx = np.digitize(value_float, bin_edges, right=False) - 1
+                    return color_range[color_idx], fill_opacity
 
         else:
 
@@ -1666,13 +1741,17 @@ class Choropleth(FeatureGroup):
 
     @classmethod
     def _get_by_key(cls, obj: Union[dict, list], key: str) -> Union[float, str, None]:
-        """Walk a dotted ``key`` path through a nested dict/list structure.
-
-        Delegates to :func:`folium._geojson_utils.get_by_key` for the
-        actual implementation; kept as a public classmethod for backward
-        compatibility.
-        """
-        return _geojson_utils.get_by_key(obj, key)
+        key_parts = key.split(".")
+        first_key_part = key_parts[0]
+        if first_key_part.isdigit():
+            value = obj[int(first_key_part)]
+        else:
+            value = obj.get(first_key_part, None)  # type: ignore
+        if len(key_parts) > 1:
+            new_key = ".".join(key_parts[1:])
+            return cls._get_by_key(value, new_key)
+        else:
+            return value
 
     def render(self, **kwargs):
         """Render the GeoJson/TopoJson and color scale objects."""
