@@ -184,3 +184,92 @@ def test_grouped_layer_control_control_false_cluster_expands():
     assert "Subgroup B" in labels
     assert len(group_entries) == 2
 
+
+def test_layer_control_excludes_grouped_managed_layers():
+    m = folium.Map([40.0, 70.0], zoom_start=6, tiles=None)
+    fg1 = folium.FeatureGroup(name="Managed1")
+    fg2 = folium.FeatureGroup(name="Managed2")
+    fg3 = folium.FeatureGroup(name="Standalone")
+    m.add_child(fg1)
+    m.add_child(fg2)
+    m.add_child(fg3)
+    glc = groupedlayercontrol.GroupedLayerControl(
+        groups={"G": [fg1, fg2]}, exclusive_groups=False
+    )
+    glc.add_to(m)
+    lc = folium.LayerControl().add_to(m)
+    lc.render()
+    overlay_labels = [v["label"] for v in lc.overlays.values()]
+    assert "Managed1" not in overlay_labels
+    assert "Managed2" not in overlay_labels
+    assert "Standalone" in overlay_labels
+    assert len(lc.overlays) == 1
+
+
+def test_layer_control_excludes_grouped_regardless_of_add_order():
+    m = folium.Map([40.0, 70.0], zoom_start=6, tiles=None)
+    fg1 = folium.FeatureGroup(name="Managed")
+    fg2 = folium.FeatureGroup(name="Standalone")
+    m.add_child(fg1)
+    m.add_child(fg2)
+    lc = folium.LayerControl().add_to(m)
+    glc = groupedlayercontrol.GroupedLayerControl(
+        groups={"G": [fg1]}, exclusive_groups=False
+    )
+    glc.add_to(m)
+    lc.render()
+    overlay_labels = [v["label"] for v in lc.overlays.values()]
+    assert "Managed" not in overlay_labels
+    assert "Standalone" in overlay_labels
+    assert len(lc.overlays) == 1
+
+
+def test_multiple_grouped_controls_do_not_interfere():
+    m = folium.Map([40.0, 70.0], zoom_start=6, tiles=None)
+    fg_a1 = folium.FeatureGroup(name="G1-A")
+    fg_a2 = folium.FeatureGroup(name="G1-B")
+    fg_b1 = folium.FeatureGroup(name="G2-A")
+    fg_b2 = folium.FeatureGroup(name="G2-B")
+    m.add_child(fg_a1)
+    m.add_child(fg_a2)
+    m.add_child(fg_b1)
+    m.add_child(fg_b2)
+    glc1 = groupedlayercontrol.GroupedLayerControl(
+        groups={"Group1": [fg_a1, fg_a2]}, exclusive_groups=False
+    )
+    glc2 = groupedlayercontrol.GroupedLayerControl(
+        groups={"Group2": [fg_b1, fg_b2]}, exclusive_groups=False
+    )
+    glc1.add_to(m)
+    glc2.add_to(m)
+    glc1.render()
+    glc2.render()
+    g1_labels = [v["label"] for v in glc1.grouped_overlays["Group1"].values()]
+    g2_labels = [v["label"] for v in glc2.grouped_overlays["Group2"].values()]
+    assert "G1-A" in g1_labels and "G1-B" in g1_labels
+    assert "G2-A" in g2_labels and "G2-B" in g2_labels
+    assert len(glc1.grouped_overlays["Group1"]) == 2
+    assert len(glc2.grouped_overlays["Group2"]) == 2
+    lc = folium.LayerControl().add_to(m)
+    lc.render()
+    overlay_labels = [v["label"] for v in lc.overlays.values()]
+    for name in ("G1-A", "G1-B", "G2-A", "G2-B"):
+        assert name not in overlay_labels
+    assert len(lc.overlays) == 0
+
+
+def test_layer_control_preserves_original_control_attribute():
+    m = folium.Map([40.0, 70.0], zoom_start=6, tiles=None)
+    fg = folium.FeatureGroup(name="Managed")
+    m.add_child(fg)
+    assert fg.control is True
+    glc = groupedlayercontrol.GroupedLayerControl(
+        groups={"G": [fg]}, exclusive_groups=False
+    )
+    glc.add_to(m)
+    assert fg.control is True, "GroupedLayerControl.__init__ must not mutate control"
+    lc = folium.LayerControl().add_to(m)
+    lc.render()
+    glc.render()
+    assert fg.control is True, "Render must not mutate control"
+

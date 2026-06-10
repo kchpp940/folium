@@ -426,9 +426,19 @@ class LayerControl(MacroElement):
 
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
+        from folium.plugins.groupedlayercontrol import GroupedLayerControl
+
         self.reset()
+        excluded_ids: set[int] = set()
+        if hasattr(self._parent, "_children"):
+            for child in self._parent._children.values():
+                if isinstance(child, GroupedLayerControl):
+                    child.refresh_controlled_layer_ids()
+                    excluded_ids.update(child.get_controlled_layer_ids())
         all_layers = _collect_controllable_layers(self._parent)
         for key, layer_info in all_layers.items():
+            if id(layer_info["layer"]) in excluded_ids:
+                continue
             if not layer_info["overlay"]:
                 self.base_layers[key] = layer_info
             else:
