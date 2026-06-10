@@ -717,7 +717,12 @@ class GeoJson(Layer):
         self.data = self.process_data(data)
 
         if self.style or self.highlight:
-            self.convert_to_feature_collection()
+            if not self.embed:
+                raise ValueError(
+                    "style_function and highlight_function require "
+                    "`embed=True` because the data needs to be processed."
+                )
+            self._normalize_data()
             if style_function is not None:
                 self._validate_function(style_function, "style_function")
                 self.style_function = style_function
@@ -726,7 +731,7 @@ class GeoJson(Layer):
                 self._validate_function(highlight_function, "highlight_function")
                 self.highlight_function = highlight_function
                 self.highlight_map: dict = {}
-            self.feature_identifier = self.find_identifier()
+            self.feature_identifier = self._select_identifier()
 
         if isinstance(tooltip, (GeoJsonTooltip, Tooltip)):
             self.add_child(tooltip)
@@ -766,38 +771,144 @@ class GeoJson(Layer):
     def get_geojson_from_web(self, url: str) -> dict:
         return requests.get(url).json()
 
-    def convert_to_feature_collection(self) -> None:
-        """Convert data into a FeatureCollection if it is not already."""
-        if self.data["type"] == "FeatureCollection":
-            for feature in self.data["features"]:
-                if "properties" not in feature or feature["properties"] is None:
-                    feature["properties"] = {}
+    def _normalize_data(self) -> None:
+        """Normalize data into a consistent FeatureCollection structure.
+
+        Performs the following operations on the internal data copy:
+        - Converts single Feature or raw Geometry to FeatureCollection
+        - Ensures every feature has a non-None ``properties`` dict
+
+        Identifier assignment is handled separately by
+        :meth:`_ensure_unique_ids` only when an identifier is actually
+        needed (i.e. when style_function or highlight_function is used).
+
+        This method operates only on the internal deep copy; the caller's
+        original data is never modified.
+        """
+        data = self.data
+
+        if data.get("type") != "FeatureCollection":
+            if "geometry" not in data:
+                data = {
+                    "type": "Feature",
+                    "geometry": data,
+                    "properties": {},
+                }
+            else:
+                if "properties" not in data or data["properties"] is None:
+                    data["properties"] = {}
+            data = {"type": "FeatureCollection", "features": [data]}
+            self.data = data
+
+        for feature in data["features"]:
+            if "properties" not in feature or feature["properties"] is None:
+                feature["properties"] = {}
+
+    def _ensure_unique_ids(self) -> None:
+        """Assign unique internal ids where user-provided ids are
+        missing, invalid, or duplicated.
+
+        Internal ids are stringified integers guaranteed not to collide
+        with existing valid ids. This method is idempotent: calling it
+        multiple times produces the same result.
+        """
+        feats = self.data["features"]
+        if not feats:
             return
-        if not self.embed:
-            raise ValueError(
-                "Data is not a FeatureCollection, but it should be to apply "
-                "style or highlight. Because `embed=False` it cannot be "
-                "converted into one.\nEither change your geojson data to a "
-                "FeatureCollection, set `embed=True` or disable styling."
-            )
-        if "geometry" not in self.data.keys():
-            self.data = {
-                "type": "Feature",
-                "geometry": self.data,
-                "properties": {},
-            }
-        else:
-            if "properties" not in self.data or self.data["properties"] is None:
-                self.data["properties"] = {}
-        self.data = {"type": "FeatureCollection", "features": [self.data]}
+
+        existing_valid_ids: set = set()
+        needs_id: list[int] = []
+        for idx, feat in enumerate(feats):
+            fid = feat.get("id")
+            if isinstance(fid, (str, int)) and fid not in existing_valid_ids:
+                existing_valid_ids.add(fid)
+            else:
+                needs_id.append(idx)
+
+        if not needs_id:
+            return
+
+        counter = 0
+        for idx in needs_id:
+                while str(counter) in existing_valid_ids:
+                    counter += 1
+                new_id = str(counter)
+                feats[idx]["id"] = new_id
+                existing_valid_ids.add(new_id)
+                counter += 1
+
+    def _select_identifier(self) -> str:
+        """Select the most appropriate Javascript identifier expression.
+
+        Returns one of:
+        - ``"feature.id"`` if every feature has a unique valid ``id``
+          supplied by the user.
+        - ``"feature.properties.<key>"`` if a single property key holds
+          unique str/int values across all features (preferred over
+          generating internal ids because it preserves the user's natural
+          identifier).
+        - ``"feature.id"`` otherwise (fallback: internally generated unique ids are
+          assigned via :meth:`_ensure_unique_ids` before returning.
+
+        The selection is deterministic and based on the normalized data.
+        """
+        feats = self.data["features"]
+        if not feats:
+            return "feature.id"
+
+        user_supplied_ids = [
+            feat.get("id")
+            for feat in feats
+            if isinstance(feat.get("id"), (str, int))
+        ]
+        if len(user_supplied_ids) == len(feats) and len(set(user_supplied_ids)) == len(feats):
+            return "feature.id"
+
+        if all(isinstance(feat.get("properties"), dict) for feat in feats) and feats[0]["properties"]:
+            for key in feats[0]["properties"]:
+                values: list = []
+                all_valid = True
+                for feat in feats:
+                    val = feat["properties"].get(key)
+                    if not isinstance(val, (str, int)):
+                        all_valid = False
+                        break
+                    values.append(val)
+                if all_valid and len(set(values)) == len(feats):
+                    return f"feature.properties.{key}"
+
+        self._ensure_unique_ids()
+        return "feature.id"
+
+    def convert_to_feature_collection(self) -> None:
+        """Convert data into a FeatureCollection if it is not already.
+
+        .. deprecated::
+            This method is kept for backward compatibility. Normalization
+            now happens automatically during ``__init__`` via
+            :meth:`_normalize_data`.
+        """
+        if self.embed:
+            self._normalize_data()
+
+    def find_identifier(self) -> str:
+        """Find a unique identifier for each feature, create it if needed.
+
+        .. deprecated::
+            This method is kept for backward compatibility. It returns
+            the same result as :meth:`_select_identifier`, while the
+            actual id generation has already happened in
+            :meth:`_normalize_data` during ``__init__``.
+        """
+        if self.embed:
+            self._normalize_data()
+        return self._select_identifier()
 
     def _validate_function(self, func: Callable, name: str) -> None:
         """
         Tests `self.style_function` and `self.highlight_function` to ensure
         they are functions returning dictionaries.
         """
-        # If for some reason there are no features (e.g., empty API response)
-        # don't attempt validation
         if not self.data["features"]:
             return
 
@@ -808,84 +919,6 @@ class GeoJson(Layer):
                 "data['features'] and returns a dictionary."
             )
 
-    def find_identifier(self) -> str:
-        """Find a unique identifier for each feature, create it if needed.
-
-        According to the GeoJSON specs a feature:
-         - MAY have an 'id' field with a string or numerical value.
-         - MUST have a 'properties' field. The content can be any json object
-           or even null.
-
-        """
-        feats = self.data["features"]
-        if not feats:
-            return "feature.id"
-
-        def _has_unique_ids():
-            ids = []
-            for feat in feats:
-                fid = feat.get("id")
-                if fid is None or not isinstance(fid, (str, int)):
-                    return False
-                ids.append(fid)
-            return len(set(ids)) == len(ids)
-
-        if _has_unique_ids():
-            return "feature.id"
-
-        def _has_unique_property():
-            prop_features = [
-                feat for feat in feats
-                if isinstance(feat.get("properties"), dict)
-            ]
-            if len(prop_features) != len(feats):
-                return None
-            if not feats[0]["properties"]:
-                return None
-            for key in feats[0]["properties"]:
-                values = []
-                all_valid = True
-                for feat in feats:
-                    val = feat["properties"].get(key)
-                    if not isinstance(val, (str, int)):
-                        all_valid = False
-                        break
-                    values.append(val)
-                if all_valid and len(set(values)) == len(feats):
-                    return key
-            return None
-
-        unique_prop = _has_unique_property()
-        if unique_prop is not None:
-            return f"feature.properties.{unique_prop}"
-
-        if self.embed:
-            existing_ids = {
-                feat["id"] for feat in feats
-                if isinstance(feat.get("id"), (str, int))
-            }
-            counter = 0
-            for feature in feats:
-                if (
-                    "id" not in feature
-                    or feature["id"] is None
-                    or not isinstance(feature["id"], (str, int))
-                    or feature["id"] in existing_ids
-                ):
-                    while str(counter) in existing_ids:
-                        counter += 1
-                    new_id = str(counter)
-                    feature["id"] = new_id
-                    existing_ids.add(new_id)
-                    counter += 1
-            return "feature.id"
-
-        raise ValueError(
-            "There is no unique identifier for each feature and because "
-            "`embed=False` it cannot be added. Consider adding an `id` "
-            "field to your geojson data or set `embed=True`. "
-        )
-
     def _get_self_bounds(self) -> list[list[Optional[float]]]:
         """
         Computes the bounds of the object itself (not including it's children)
@@ -894,11 +927,45 @@ class GeoJson(Layer):
         """
         return get_bounds(self.data, lonlat=True)
 
+    def get_feature_id(self, feature: dict) -> Union[str, int]:
+        """Return the unique identifier for a feature.
+
+        The identifier is resolved using the same logic that generates
+        the Javascript expression used in the rendered template, so the
+        Python and Javascript sides always agree on how to identify a
+        feature.
+
+        Parameters
+        ----------
+        feature: dict
+            A GeoJSON Feature dictionary from the normalized internal
+            data copy.
+
+        Returns
+        -------
+        str or int
+            The feature's unique identifier.
+        """
+        identifier = getattr(self, "feature_identifier", "feature.id")
+        fields = identifier.split(".")[1:]
+        value: Any = feature
+        for field in fields:
+            if isinstance(value, dict):
+                value = value.get(field)
+            else:
+                value = None
+                break
+        assert isinstance(value, (str, int)), (
+            f"Resolved identifier {identifier!r} to non-scalar value "
+            f"{value!r} on feature. This indicates that the data was not "
+            "properly normalized before rendering."
+        )
+        return value
+
     def render(self, **kwargs):
         self.parent_map = get_obj_in_upper_tree(self, Map)
-        # Need at least one feature, otherwise style mapping fails
         if (self.style or self.highlight) and self.data["features"]:
-            mapper = GeoJsonStyleMapper(self.data, self.feature_identifier, self)
+            mapper = GeoJsonStyleMapper(self)
             if self.style:
                 self.style_map = mapper.get_style_map(self.style_function)
             if self.highlight:
@@ -915,15 +982,9 @@ class GeoJsonStyleMapper:
     :meta private:
     """
 
-    def __init__(
-        self,
-        data: dict,
-        feature_identifier: str,
-        geojson_obj: GeoJson,
-    ):
-        self.data = data
-        self.feature_identifier = feature_identifier
+    def __init__(self, geojson_obj: GeoJson):
         self.geojson_obj = geojson_obj
+        self.data = geojson_obj.data
 
     def get_style_map(self, style_function: Callable) -> TypeStyleMapping:
         """Return a dict that maps style parameters to features."""
@@ -941,24 +1002,15 @@ class GeoJsonStyleMapper:
             if switch == "style":
                 for key, value in content.items():
                     if isinstance(value, MacroElement):
-                        # Make sure objects are rendered:
                         if value._parent is None:
                             value._parent = self.geojson_obj
                             value.render()
-                        # Replace objects with their Javascript var names:
                         content[key] = "{{'" + value.get_name() + "'}}"
             key = self._to_key(content)
-            feature_id = self.get_feature_id(feature)
+            feature_id = self.geojson_obj.get_feature_id(feature)
             mapping.setdefault(key, []).append(feature_id)  # type: ignore
         self._set_default_key(mapping)
         return mapping
-
-    def get_feature_id(self, feature: dict) -> Union[str, int]:
-        """Return a value identifying the feature."""
-        fields = self.feature_identifier.split(".")[1:]
-        value = functools.reduce(operator.getitem, fields, feature)
-        assert isinstance(value, (str, int))
-        return value
 
     @staticmethod
     def _to_key(d: dict) -> str:
