@@ -240,6 +240,14 @@ def _collect_controllable_layers(parent):
     """
     Recursively collect all controllable Layer objects from an element tree.
 
+    A controllable Layer is one where control=True. Such layers act as
+    "control boundaries": the layer itself is collected, but its children
+    are not traversed further, because they are considered part of this
+    group's domain and should not appear as separate top-level controls.
+
+    Non-Layer elements and layers with control=False are traversed into,
+    so that nested controllable layers can still be discovered.
+
     Returns an OrderedDict where keys are unique layer identifiers (get_name())
     and values are dicts with the following keys:
     - label: the display name (layer_name)
@@ -256,7 +264,8 @@ def _collect_controllable_layers(parent):
     seen_ids: set[int] = set()
 
     def _walk(element):
-        if isinstance(element, Layer) and element.control:
+        is_controllable = isinstance(element, Layer) and element.control
+        if is_controllable:
             obj_id = id(element)
             if obj_id not in seen_ids:
                 seen_ids.add(obj_id)
@@ -268,6 +277,7 @@ def _collect_controllable_layers(parent):
                     "show": element.show,
                     "layer": element,
                 }
+            return
 
         if hasattr(element, "_children"):
             for child in element._children.values():
