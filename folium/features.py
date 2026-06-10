@@ -3,6 +3,7 @@ Leaflet GeoJson and miscellaneous features.
 
 """
 
+import copy
 import functools
 import json
 import operator
@@ -738,7 +739,7 @@ class GeoJson(Layer):
         """Convert an unknown data input into a geojson dictionary."""
         if isinstance(data, dict):
             self.embed = True
-            return data
+            return copy.deepcopy(data)
         elif isinstance(data, str):
             if data.lower().startswith(("http:", "ftp:", "https:")):
                 if not self.embed:
@@ -768,6 +769,9 @@ class GeoJson(Layer):
     def convert_to_feature_collection(self) -> None:
         """Convert data into a FeatureCollection if it is not already."""
         if self.data["type"] == "FeatureCollection":
+            for feature in self.data["features"]:
+                if "properties" not in feature or feature["properties"] is None:
+                    feature["properties"] = {}
             return
         if not self.embed:
             raise ValueError(
@@ -776,10 +780,15 @@ class GeoJson(Layer):
                 "converted into one.\nEither change your geojson data to a "
                 "FeatureCollection, set `embed=True` or disable styling."
             )
-        # Catch case when GeoJSON is just a single Feature or a geometry.
         if "geometry" not in self.data.keys():
-            # Catch case when GeoJSON is just a geometry.
-            self.data = {"type": "Feature", "geometry": self.data}
+            self.data = {
+                "type": "Feature",
+                "geometry": self.data,
+                "properties": {},
+            }
+        else:
+            if "properties" not in self.data or self.data["properties"] is None:
+                self.data["properties"] = {}
         self.data = {"type": "FeatureCollection", "features": [self.data]}
 
     def _validate_function(self, func: Callable, name: str) -> None:
@@ -809,25 +818,68 @@ class GeoJson(Layer):
 
         """
         feats = self.data["features"]
-        # Each feature has an 'id' field with a unique value.
-        unique_ids = {feat.get("id", None) for feat in feats}
-        if None not in unique_ids and len(unique_ids) == len(feats):
+        if not feats:
             return "feature.id"
-        # Each feature has a unique string or int property.
-        if all(isinstance(feat.get("properties", None), dict) for feat in feats):
+
+        def _has_unique_ids():
+            ids = []
+            for feat in feats:
+                fid = feat.get("id")
+                if fid is None or not isinstance(fid, (str, int)):
+                    return False
+                ids.append(fid)
+            return len(set(ids)) == len(ids)
+
+        if _has_unique_ids():
+            return "feature.id"
+
+        def _has_unique_property():
+            prop_features = [
+                feat for feat in feats
+                if isinstance(feat.get("properties"), dict)
+            ]
+            if len(prop_features) != len(feats):
+                return None
+            if not feats[0]["properties"]:
+                return None
             for key in feats[0]["properties"]:
-                unique_values = {
-                    feat["properties"].get(key, None)
-                    for feat in feats
-                    if isinstance(feat["properties"].get(key, None), (str, int))
-                }
-                if len(unique_values) == len(feats):
-                    return f"feature.properties.{key}"
-        # We add an 'id' field with a unique value to the data.
+                values = []
+                all_valid = True
+                for feat in feats:
+                    val = feat["properties"].get(key)
+                    if not isinstance(val, (str, int)):
+                        all_valid = False
+                        break
+                    values.append(val)
+                if all_valid and len(set(values)) == len(feats):
+                    return key
+            return None
+
+        unique_prop = _has_unique_property()
+        if unique_prop is not None:
+            return f"feature.properties.{unique_prop}"
+
         if self.embed:
-            for i, feature in enumerate(feats):
-                feature["id"] = str(i)
+            existing_ids = {
+                feat["id"] for feat in feats
+                if isinstance(feat.get("id"), (str, int))
+            }
+            counter = 0
+            for feature in feats:
+                if (
+                    "id" not in feature
+                    or feature["id"] is None
+                    or not isinstance(feature["id"], (str, int))
+                    or feature["id"] in existing_ids
+                ):
+                    while str(counter) in existing_ids:
+                        counter += 1
+                    new_id = str(counter)
+                    feature["id"] = new_id
+                    existing_ids.add(new_id)
+                    counter += 1
             return "feature.id"
+
         raise ValueError(
             "There is no unique identifier for each feature and because "
             "`embed=False` it cannot be added. Consider adding an `id` "
@@ -1025,7 +1077,7 @@ class TopoJson(JSCSSMixin, Layer):
             self.data = json.load(data)
         elif type(data) is dict:
             self.embed = True
-            self.data = data
+            self.data = copy.deepcopy(data)
         else:
             self.embed = False
             self.data = data
