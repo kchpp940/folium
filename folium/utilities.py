@@ -234,12 +234,6 @@ def _raw_to_renderable_image_data_uri(raw: str) -> Optional[str]:
     return None
 
 
-def _escape_embedded_string(s: str) -> str:
-    """Stably escape a raw string so it can be safely embedded in generated output."""
-    escaped = json.dumps(s, ensure_ascii=False)
-    return escaped[1:-1].replace("\n", " ")
-
-
 def _is_renderable_image_source(image: Any) -> tuple[bool, Optional[str]]:
     """
     Check whether an input is a valid renderable image source for image layers.
@@ -314,6 +308,13 @@ def image_to_url(
     """
     Infers the type of an image argument and transforms it into a URL.
 
+    This function focuses on image source resolution only. For raw strings
+    that are not renderable as images (JSON, plain text, etc.), the
+    original string is returned unchanged — callers that require safe
+    embedding are responsible for escaping at the template injection point,
+    and image-layer entry points (ImageOverlay/FloatImage/CustomIcon)
+    validate renderability and reject non-image sources explicitly.
+
     Parameters
     ----------
     image: string, PathLike, or array-like object
@@ -324,7 +325,6 @@ def image_to_url(
         *  If string is a URL, it will be linked in the output URL.
         *  If string is SVG markup or naked base64-encoded image binary,
            it will be wrapped into a proper image data URI.
-        *  Otherwise a string will be safely escaped for embedded output.
         *  If array-like, it will be converted to PNG base64 string and
            embedded in the output URL.
     origin: ['upper' | 'lower'], optional, default 'upper'
@@ -361,10 +361,7 @@ def image_to_url(
     else:
         if isinstance(image, str):
             renderable = _raw_to_renderable_image_data_uri(image)
-            if renderable is not None:
-                url = renderable
-            else:
-                url = _escape_embedded_string(image)
+            url = renderable if renderable is not None else image
         else:
             url = json.dumps(image)
 

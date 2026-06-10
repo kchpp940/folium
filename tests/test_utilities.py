@@ -423,7 +423,7 @@ def test_is_renderable_image_source_existing_file(tmp_path):
         ),
         (
             _JSON_OBJECT,
-            lambda url: not url.startswith("data:application/json;base64,"),
+            lambda url: url == _JSON_OBJECT,
         ),
         (
             "https://example.com/img.png",
@@ -444,17 +444,21 @@ def test_image_to_url(image, check_fn):
     assert check_fn(result), f"Failed for input type {type(image).__name__}"
 
 
-def test_image_to_url_plain_text_escaped():
+def test_image_to_url_non_renderable_raw_passthrough():
+    """Non-renderable raw strings pass through image_to_url unchanged
+    (image_to_url focuses on image source resolution; escaping and
+    validation are the caller's responsibility)."""
     plain = 'plain text with "quotes" and \'apostrophes\''
     result = image_to_url(plain)
+    assert result == plain.replace("\n", " ")
     assert "data:image" not in result
     assert "data:application/json" not in result
-    assert "\n" not in result
 
 
 def test_image_to_url_json_not_wrapped_as_data_uri():
     result = image_to_url(_JSON_OBJECT)
     assert not result.startswith("data:application/json;base64,")
+    assert result == _JSON_OBJECT
     assert "Feature" in result
 
 
