@@ -58,8 +58,17 @@ def test_layer_control_render():
     layer_control = LayerControl().add_to(m)
     layer_control.render()
 
-    assert layer_control.base_layers == {"Layer1": "layer1"}
-    assert layer_control.overlays == {"Layer3": "layer3"}
+    assert len(layer_control.base_layers) == 1
+    assert "layer1" in layer_control.base_layers
+    assert layer_control.base_layers["layer1"]["label"] == "Layer1"
+    assert layer_control.base_layers["layer1"]["layer_js"] == "layer1"
+    assert layer_control.base_layers["layer1"]["overlay"] is False
+
+    assert len(layer_control.overlays) == 1
+    assert "layer3" in layer_control.overlays
+    assert layer_control.overlays["layer3"]["label"] == "Layer3"
+    assert layer_control.overlays["layer3"]["layer_js"] == "layer3"
+    assert layer_control.overlays["layer3"]["overlay"] is True
 
 
 def test_layer_control_draggable():

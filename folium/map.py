@@ -236,6 +236,47 @@ class LayerGroup(Layer):
         self.options = remove_empty(**kwargs)
 
 
+def _collect_controllable_layers(parent):
+    """
+    Recursively collect all controllable Layer objects from an element tree.
+
+    Returns an OrderedDict where keys are unique layer identifiers (get_name())
+    and values are dicts with the following keys:
+    - label: the display name (layer_name)
+    - layer_js: the JavaScript variable name (get_name())
+    - overlay: whether the layer is an overlay (True) or base layer (False)
+    - show: whether the layer is shown by default
+    - layer: the Layer object itself
+
+    Layers are deduplicated by object identity, so the same layer object
+    will only appear once even if it's reachable through multiple paths.
+    The order of layers follows a depth-first traversal of the element tree.
+    """
+    result: OrderedDict[str, dict] = OrderedDict()
+    seen_ids: set[int] = set()
+
+    def _walk(element):
+        if isinstance(element, Layer) and element.control:
+            obj_id = id(element)
+            if obj_id not in seen_ids:
+                seen_ids.add(obj_id)
+                key = element.get_name()
+                result[key] = {
+                    "label": element.layer_name,
+                    "layer_js": element.get_name(),
+                    "overlay": element.overlay,
+                    "show": element.show,
+                    "layer": element,
+                }
+
+        if hasattr(element, "_children"):
+            for child in element._children.values():
+                _walk(child)
+
+    _walk(parent)
+    return result
+
+
 class LayerControl(MacroElement):
     """
     Creates a LayerControl object to be added on a folium map.
@@ -274,12 +315,12 @@ class LayerControl(MacroElement):
             var {{ this.get_name() }}_layers = {
                 base_layers : {
                     {%- for key, val in this.base_layers.items() %}
-                    {{ key|tojson }} : {{val}},
+                    {{ val.label|tojson }} : {{ val.layer_js }},
                     {%- endfor %}
                 },
                 overlays :  {
                     {%- for key, val in this.overlays.items() %}
-                    {{ key|tojson }} : {{val}},
+                    {{ val.label|tojson }} : {{ val.layer_js }},
                     {%- endfor %}
                 },
             };
@@ -310,8 +351,8 @@ class LayerControl(MacroElement):
             position=position, collapsed=collapsed, autoZIndex=autoZIndex, **kwargs
         )
         self.draggable = draggable
-        self.base_layers: OrderedDict[str, str] = OrderedDict()
-        self.overlays: OrderedDict[str, str] = OrderedDict()
+        self.base_layers: OrderedDict[str, dict] = OrderedDict()
+        self.overlays: OrderedDict[str, dict] = OrderedDict()
 
     def reset(self) -> None:
         self.base_layers = OrderedDict()
@@ -320,14 +361,12 @@ class LayerControl(MacroElement):
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
         self.reset()
-        for item in self._parent._children.values():
-            if not isinstance(item, Layer) or not item.control:
-                continue
-            key = item.layer_name
-            if not item.overlay:
-                self.base_layers[key] = item.get_name()
+        all_layers = _collect_controllable_layers(self._parent)
+        for key, layer_info in all_layers.items():
+            if not layer_info["overlay"]:
+                self.base_layers[key] = layer_info
             else:
-                self.overlays[key] = item.get_name()
+                self.overlays[key] = layer_info
         super().render()
 
 

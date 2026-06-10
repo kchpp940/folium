@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._time_dimension import TIME_DIMENSION_SHARED_CLASS_JS
 from folium.raster_layers import WmsTileLayer
 from folium.template import Template
 from folium.utilities import remove_empty
@@ -63,31 +62,18 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
 
     """
 
-    _template = Template(
-        """
-        {% macro header(this, kwargs) %}
-            <script>
-            """
-        + TIME_DIMENSION_SHARED_CLASS_JS
-        + """
-            </script>
-        {% endmacro %}
-
+    _template = Template("""
         {% macro script(this, kwargs) %}
-            var map = {{ this._parent.get_name() }};
-            if (!map.timeDimension) {
-                map.timeDimension = L.timeDimension(
-                    {{ this.options|tojavascript }}
+            {{ this._parent.get_name() }}.timeDimension = L.timeDimension(
+                {{ this.options|tojavascript }}
+            );
+            {{ this._parent.get_name() }}.timeDimensionControl =
+                L.control.timeDimension(
+                    {{ this.options_control|tojavascript }}
                 );
-            }
-
-            if (!map._timeDimensionControl) {
-                var controlOptions = {{ this.options_control|tojavascript }};
-                controlOptions.formatOptions = { dateFormat: 'YYYY-MM-DD HH:mm:ss' };
-                var {{ this._control_name }} = new L.Control.TimeDimensionShared(controlOptions);
-                map.addControl({{ this._control_name }});
-                map._timeDimensionControl = {{ this._control_name }};
-            }
+            {{ this._parent.get_name() }}.addControl(
+                {{ this._parent.get_name() }}.timeDimensionControl
+            );
 
             {% for layer in this.layers %}
             var {{ layer.get_name() }} = L.timeDimension.layer.wms(
@@ -99,8 +85,7 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
             ).addTo({{ this._parent.get_name() }});
             {% endfor %}
         {% endmacro %}
-        """
-    )
+        """)
 
     default_js = [
         (
@@ -142,7 +127,6 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
     ):
         super().__init__()
         self._name = "TimestampedWmsTileLayers"
-        self._control_name = self.get_name() + "Control"
         self.options = remove_empty(
             period=period,
             time_interval=time_interval,

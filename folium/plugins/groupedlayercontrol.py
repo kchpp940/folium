@@ -50,7 +50,7 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
                     {%- for group_name, overlays in this.grouped_overlays.items() %}
                     {{ group_name|tojson }} : {
                         {%- for overlaykey, val in overlays.items() %}
-                        {{ overlaykey|tojson }} : {{val}},
+                        {{ val.label|tojson }} : {{ val.layer_js }},
                         {%- endfor %}
                     },
                     {%- endfor %}
@@ -71,20 +71,40 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         self.options = remove_empty(**kwargs)
         if exclusive_groups:
             self.options["exclusiveGroups"] = list(groups.keys())
+        self._groups = groups
+        self._exclusive_groups = exclusive_groups
         self.layers_untoggle = set()
         self.grouped_overlays = {}
-        for group_name, sublist in groups.items():
-            self.grouped_overlays[group_name] = {}
+        for element in self._iter_all_layers():
+            element.control = False
+
+    def _iter_all_layers(self):
+        seen = set()
+        for sublist in self._groups.values():
             for element in sublist:
-                self.grouped_overlays[group_name][
-                    element.layer_name
-                ] = element.get_name()
+                if id(element) not in seen:
+                    seen.add(id(element))
+                    yield element
+
+    def render(self, **kwargs):
+        """Renders the HTML representation of the element."""
+        self.layers_untoggle = set()
+        self.grouped_overlays = {}
+        for group_name, sublist in self._groups.items():
+            self.grouped_overlays[group_name] = {}
+            group_seen_ids = set()
+            for idx, element in enumerate(sublist):
+                obj_id = id(element)
+                if obj_id in group_seen_ids:
+                    continue
+                group_seen_ids.add(obj_id)
+                key = element.get_name()
+                self.grouped_overlays[group_name][key] = {
+                    "label": element.layer_name,
+                    "layer_js": element.get_name(),
+                }
                 if not element.show:
                     self.layers_untoggle.add(element.get_name())
-                # make sure the elements used in GroupedLayerControl
-                # don't show up in the regular LayerControl.
-                element.control = False
-            if exclusive_groups:
-                # only enable the first radio button
-                for element in sublist[1:]:
+                if self._exclusive_groups and idx > 0:
                     self.layers_untoggle.add(element.get_name())
+        super().render()

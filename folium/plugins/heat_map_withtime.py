@@ -1,9 +1,5 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer
-from folium.plugins._time_dimension import (
-    TIME_DIMENSION_SHARED_CLASS_JS,
-    TIMELINE_SLIDER_ISOLATION_CSS,
-)
 from folium.template import Template
 from folium.utilities import none_max, none_min
 
@@ -61,8 +57,7 @@ class HeatMapWithTime(JSCSSMixin, Layer):
 
     """
 
-    _template = Template(
-        """
+    _template = Template("""
         {% macro header(this, kwargs) %}
             <script>
             var TDHeatmap = L.TimeDimension.Layer.extend({
@@ -127,62 +122,54 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                 }
             });
 
-            """
-        + TIME_DIMENSION_SHARED_CLASS_JS
-        + """
+            L.Control.TimeDimensionCustom = L.Control.TimeDimension.extend({
+                initialize: function(index, options) {
+                    var playerOptions = {
+                        buffer: 1,
+                        minBufferReady: -1
+                        };
+                    options.playerOptions = $.extend({}, playerOptions, options.playerOptions || {});
+                    L.Control.TimeDimension.prototype.initialize.call(this, options);
+                    this.index = index;
+                },
+                _getDisplayDateFormat: function(date) {
+                    return this.index[date.getTime()-1];
+                }
+            });
             </script>
         {% endmacro %}
 
         {% macro script(this, kwargs) %}
 
             var times = {{this.times}};
-            var map = {{this._parent.get_name()}};
 
-            if (!map.timeDimension) {
-                map.timeDimension = L.timeDimension(
-                    {times : times, currentTime: new Date(1)}
-                );
-            } else {
-                var existingTimes = map.timeDimension.getAvailableTimes();
-                var newTimes = times.filter(function(t) {
-                    return existingTimes.indexOf(t) === -1;
-                });
-                if (newTimes.length > 0) {
-                    var mergedTimes = existingTimes.concat(newTimes).sort(function(a, b) {
-                        return a - b;
-                    });
-                    map.timeDimension.setAvailableTimes(mergedTimes);
-                }
-            }
+            {{this._parent.get_name()}}.timeDimension = L.timeDimension(
+                {times : times, currentTime: new Date(1)}
+            );
 
-            if (!map._timeDimensionControl) {
-                var {{this._control_name}} = new L.Control.TimeDimensionShared({
-                    autoPlay: {{this.auto_play}},
-                    backwardButton: {{this.backward_button}},
-                    displayDate: {{this.display_index}},
-                    forwardButton: {{this.forward_button}},
-                    limitMinimumRange: {{this.limit_minimum_range}},
-                    limitSliders: {{this.limit_sliders}},
-                    loopButton: {{this.loop_button}},
-                    maxSpeed: {{this.max_speed}},
-                    minSpeed: {{this.min_speed}},
-                    playButton: {{this.play_button}},
-                    playReverseButton: {{this.play_reverse_button}},
-                    position: "{{this.position}}",
-                    speedSlider: {{this.speed_slider}},
-                    speedStep: {{this.speed_step}},
-                    styleNS: "{{this.style_NS}}",
-                    timeSlider: {{this.time_slider}},
-                    timeSliderDragUpdate: {{this.time_slider_drag_update}},
-                    timeSteps: {{this.index_steps}},
-                    formatOptions: { dateFormat: 'YYYY-MM-DD HH:mm:ss' }
-                });
-                {{this._control_name}}.addTo(map);
-                map._timeDimensionControl = {{this._control_name}};
-            }
-            map._timeDimensionControl.registerIndex(times, {{this.index}});
+            var {{this._control_name}} = new L.Control.TimeDimensionCustom({{this.index}}, {
+                autoPlay: {{this.auto_play}},
+                backwardButton: {{this.backward_button}},
+                displayDate: {{this.display_index}},
+                forwardButton: {{this.forward_button}},
+                limitMinimumRange: {{this.limit_minimum_range}},
+                limitSliders: {{this.limit_sliders}},
+                loopButton: {{this.loop_button}},
+                maxSpeed: {{this.max_speed}},
+                minSpeed: {{this.min_speed}},
+                playButton: {{this.play_button}},
+                playReverseButton: {{this.play_reverse_button}},
+                position: "{{this.position}}",
+                speedSlider: {{this.speed_slider}},
+                speedStep: {{this.speed_step}},
+                styleNS: "{{this.style_NS}}",
+                timeSlider: {{this.time_slider}},
+                timeSliderDragUpdate: {{this.time_slider_drag_update}},
+                timeSteps: {{this.index_steps}}
+                })
+                .addTo({{this._parent.get_name()}});
 
-            var {{this.get_name()}} = new TDHeatmap({{this.data}},
+                var {{this.get_name()}} = new TDHeatmap({{this.data}},
                 {heatmapOptions: {
                         radius: {{this.radius}},
                         blur: {{this.blur}},
@@ -196,8 +183,7 @@ class HeatMapWithTime(JSCSSMixin, Layer):
                 });
 
         {% endmacro %}
-        """
-    )
+        """)
 
     default_js = [
         (

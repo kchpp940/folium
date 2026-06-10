@@ -4,7 +4,6 @@ from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
 from folium.folium import Map
-from folium.plugins._time_dimension import TIME_DIMENSION_SHARED_CLASS_JS
 from folium.template import Template
 from folium.utilities import get_bounds, remove_empty
 
@@ -79,34 +78,24 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
 
     """
 
-    _template = Template(
-        """
-        {% macro header(this, kwargs) %}
-            <script>
-            """
-        + TIME_DIMENSION_SHARED_CLASS_JS
-        + """
-            </script>
-        {% endmacro %}
-
+    _template = Template("""
         {% macro script(this, kwargs) %}
-            var map = {{this._parent.get_name()}};
-            if (!map.timeDimension) {
-                map.timeDimension = L.timeDimension(
-                    {
-                        period: {{ this.period|tojson }},
-                    }
-                );
-            }
-
-            var controlOptions = {{ this.options|tojavascript }};
-            controlOptions.formatOptions = { dateFormat: "{{this.date_options}}" };
-            if (!map._timeDimensionControl) {
-                var {{this._control_name}} = new L.Control.TimeDimensionShared(controlOptions);
-                map.addControl({{this._control_name}});
-                map._timeDimensionControl = {{this._control_name}};
-            }
-            map._timeDimensionControl.registerDateFormat("{{this.date_options}}");
+            L.Control.TimeDimensionCustom = L.Control.TimeDimension.extend({
+                _getDisplayDateFormat: function(date){
+                    var newdate = new moment(date);
+                    console.log(newdate)
+                    return newdate.format("{{this.date_options}}");
+                }
+            });
+            {{this._parent.get_name()}}.timeDimension = L.timeDimension(
+                {
+                    period: {{ this.period|tojson }},
+                }
+            );
+            var timeDimensionControl = new L.Control.TimeDimensionCustom(
+                {{ this.options|tojavascript }}
+            );
+            {{this._parent.get_name()}}.addControl(this.timeDimensionControl);
 
             var geoJsonLayer = L.geoJson({{this.data}}, {
                     pointToLayer: function (feature, latLng) {
@@ -151,8 +140,7 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
                 }
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
-        """
-    )  # noqa
+        """)  # noqa
 
     default_js = [
         (
@@ -206,7 +194,6 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
     ):
         super().__init__()
         self._name = "TimestampedGeoJson"
-        self._control_name = self.get_name() + "Control"
 
         if "read" in dir(data):
             self.embed = True
