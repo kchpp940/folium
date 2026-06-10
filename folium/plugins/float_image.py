@@ -1,7 +1,7 @@
 from branca.element import MacroElement
 
 from folium.template import Template
-from folium.utilities import image_to_url
+from folium.utilities import _is_renderable_image_source, image_to_url
 
 
 class FloatImage(MacroElement):
@@ -54,6 +54,11 @@ class FloatImage(MacroElement):
     def __init__(self, image, bottom=75, left=75, **kwargs):
         super().__init__()
         self._name = "FloatImage"
+        is_renderable, reason = _is_renderable_image_source(image)
+        if not is_renderable:
+            raise ValueError(
+                f"FloatImage received a non-renderable image source. {reason}"
+            )
         self.url = image_to_url(image)
         self.bottom = bottom
         self.left = left

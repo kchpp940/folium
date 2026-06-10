@@ -42,6 +42,7 @@ from folium.utilities import (
     TypeLine,
     TypePathOptions,
     TypePosition,
+    _is_renderable_image_source,
     _parse_size,
     escape_backticks,
     get_bounds,
@@ -1865,14 +1866,20 @@ class CustomIcon(Icon):
 
     Parameters
     ----------
-    icon_image : string or array-like object
+    icon_image : string, PathLike, or array-like object
         The data to use as an icon.
 
-        * If string is a path to an image file, its content will be converted and
-          embedded.
+        * If string is a path to an image file (that exists), its content
+          will be converted and embedded.
+        * If PathLike object, it will be treated as a file path and
+          its content will be converted and embedded (file must exist).
         * If string is a URL, it will be linked.
-        * Otherwise a string will be assumed to be JSON and embedded.
+        * If string is SVG markup or naked base64-encoded image binary,
+          it will be wrapped into a proper image data URI.
         * If array-like, it will be converted to PNG base64 string and embedded.
+
+        Plain strings, JSON strings, or nonexistent paths are NOT accepted
+        and will raise a ValueError.
     icon_size : tuple of 2 int, optional
         Size of the icon image in pixels.
     icon_anchor : tuple of 2 int, optional
@@ -1912,6 +1919,19 @@ class CustomIcon(Icon):
     ):
         super(Icon, self).__init__()
         self._name = "icon"
+        is_renderable, reason = _is_renderable_image_source(icon_image)
+        if not is_renderable:
+            raise ValueError(
+                f"CustomIcon received a non-renderable icon_image source. {reason}"
+            )
+        if shadow_image is not None:
+            is_renderable_shadow, reason_shadow = _is_renderable_image_source(
+                shadow_image
+            )
+            if not is_renderable_shadow:
+                raise ValueError(
+                    f"CustomIcon received a non-renderable shadow_image source. {reason_shadow}"
+                )
         self.options = remove_empty(
             icon_url=image_to_url(icon_image),
             icon_size=icon_size,

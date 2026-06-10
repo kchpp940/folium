@@ -231,3 +231,69 @@ def test_float_image_array():
     data = np.array([[[1, 0, 0, 1]], [[0, 1, 0, 1]]])
     fi = FloatImage(data)
     assert fi.url.startswith("data:image/png;base64,")
+
+
+_JSON_DATA = '{"type": "Feature", "properties": {}}'
+
+
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        _JSON_DATA,
+        '[{"type": "Feature"}]',
+        "just_a_plain_string",
+        "not a path with spaces and & special",
+    ],
+)
+def test_image_overlay_rejects_non_renderable(bad_input):
+    """Test ImageOverlay raises ValueError for non-renderable raw strings."""
+    with pytest.raises(ValueError, match="non-renderable"):
+        folium.raster_layers.ImageOverlay(bad_input, _BOUNDS)
+
+
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        _JSON_DATA,
+        '[{"type": "Feature"}]',
+        "just_a_plain_string",
+    ],
+)
+def test_float_image_rejects_non_renderable(bad_input):
+    """Test FloatImage raises ValueError for non-renderable raw strings."""
+    from folium.plugins.float_image import FloatImage
+
+    with pytest.raises(ValueError, match="non-renderable"):
+        FloatImage(bad_input)
+
+
+def test_image_overlay_rejects_nonexistent_pathlike():
+    """Test ImageOverlay raises ValueError for nonexistent PathLike."""
+    from pathlib import Path
+
+    bad = Path("/definitely/not/a/real/path/nope.png")
+    with pytest.raises(ValueError, match="non-renderable"):
+        folium.raster_layers.ImageOverlay(bad, _BOUNDS)
+
+
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        _JSON_DATA,
+        "plain_string_not_image",
+    ],
+)
+def test_custom_icon_rejects_non_renderable(bad_input):
+    """Test CustomIcon raises ValueError for non-renderable icon_image."""
+    from folium.features import CustomIcon
+
+    with pytest.raises(ValueError, match="non-renderable"):
+        CustomIcon(bad_input)
+
+
+def test_custom_icon_rejects_non_renderable_shadow():
+    """Test CustomIcon raises ValueError for non-renderable shadow_image."""
+    from folium.features import CustomIcon
+
+    with pytest.raises(ValueError, match="non-renderable"):
+        CustomIcon(_PNG_BASE64, shadow_image="plain_string_not_image")

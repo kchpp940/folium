@@ -173,44 +173,44 @@ def _is_path_like(obj: Any) -> bool:
 
 
 _SVG_START_RE = re.compile(r"^\s*(<\?xml[^>]*>\s*)?<svg[\s>]", re.IGNORECASE)
-_JSON_START_RE = re.compile(r"^\s*[\{\[]")
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
+_IMAGE_MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+    (b"RIFF", "image/webp"),
+)
 
-def _detect_base64_mime(data: bytes) -> str:
-    """Detect MIME type from base64-decoded bytes using magic numbers."""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
-        return "image/gif"
-    if data.startswith(b"BM"):
-        return "image/bmp"
-    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        return "image/webp"
-    if data.startswith(b"%PDF"):
-        return "application/pdf"
-    if data[:2] == b"PK" and data[2:4] in (b"\x03\x04", b"\x05\x06", b"\x07\x08"):
-        return "application/zip"
+
+def _detect_image_mime(data: bytes) -> Optional[str]:
+    """Detect image MIME type from bytes using magic numbers. Returns None if not an image."""
+    for prefix, mime in _IMAGE_MAGIC_PREFIXES:
+        if data.startswith(prefix):
+            if mime == "image/webp" and (len(data) < 12 or data[8:12] != b"WEBP"):
+                continue
+            return mime
     try:
         text = data.decode("utf-8")
         if _SVG_START_RE.match(text):
             return "image/svg+xml"
-        if _JSON_START_RE.match(text):
-            json.loads(text)
-            return "application/json"
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError:
         pass
-    return "application/octet-stream"
+    return None
 
 
-def _raw_to_data_uri(raw: str) -> str:
+def _raw_to_renderable_image_data_uri(raw: str) -> Optional[str]:
     """
-    Convert raw content string to an appropriate data URI.
+    Convert raw content string to a renderable image data URI.
 
-    Detects SVG, JSON, and base64-encoded binary content and wraps them
-    in a proper data URI with the correct MIME type.
+    Only handles content that can legitimately be used as an <img> src:
+    - SVG markup → data:image/svg+xml;base64,...
+    - Naked base64-encoded image binary (PNG/JPEG/GIF/etc.) → data:image/*;base64,...
+
+    Returns None if the raw string is not a renderable image.
+    Does NOT wrap JSON or arbitrary text — those are not image sources.
     """
     stripped = raw.strip()
 
@@ -218,23 +218,70 @@ def _raw_to_data_uri(raw: str) -> str:
         b64 = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
         return f"data:image/svg+xml;base64,{b64}"
 
-    if _JSON_START_RE.match(stripped):
+    if (
+        len(stripped) >= 4
+        and len(stripped) % 4 == 0
+        and _BASE64_RE.match(stripped)
+    ):
         try:
-            json.loads(stripped)
-            b64 = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
-            return f"data:application/json;base64,{b64}"
-        except json.JSONDecodeError:
-            pass
-
-    if len(stripped) >= 4 and len(stripped) % 4 == 0 and _BASE64_RE.match(stripped):
-        try:
-            decoded = base64.b64decode(stripped)
-            mime = _detect_base64_mime(decoded)
-            return f"data:{mime};base64,{stripped}"
+            decoded = base64.b64decode(stripped, validate=True)
         except Exception:
-            pass
+            return None
+        mime = _detect_image_mime(decoded)
+        if mime is not None:
+            return f"data:{mime};base64,{stripped}"
 
-    return raw
+    return None
+
+
+def _escape_embedded_string(s: str) -> str:
+    """Stably escape a raw string so it can be safely embedded in generated output."""
+    escaped = json.dumps(s, ensure_ascii=False)
+    return escaped[1:-1].replace("\n", " ")
+
+
+def _is_renderable_image_source(image: Any) -> tuple[bool, Optional[str]]:
+    """
+    Check whether an input is a valid renderable image source for image layers.
+
+    Returns (is_valid, reason).
+    Valid renderable sources are: array, pathlike (file must exist), URL,
+    local file string (file must exist), SVG raw string, and naked base64
+    image binary.
+    JSON strings, arbitrary plain text, and nonexistent paths are NOT valid.
+    """
+    src_type = _image_source_type(image)
+
+    if src_type == "array":
+        return True, None
+
+    if src_type == "url":
+        return True, None
+
+    if src_type == "file":
+        return True, None
+
+    if src_type == "pathlike":
+        file_path = os.fspath(image)
+        if os.path.isfile(file_path):
+            return True, None
+        return False, (
+            f"PathLike object points to a nonexistent file: {file_path!r}. "
+            "The file must exist to be used as an image source."
+        )
+
+    if src_type == "raw":
+        assert isinstance(image, str)
+        if _raw_to_renderable_image_data_uri(image) is not None:
+            return True, None
+        return False, (
+            "Raw string is not a renderable image source. "
+            "Expected a URL, path to an existing file, PathLike object, "
+            "SVG markup, base64-encoded image binary, or array-like image data. "
+            "Got a plain string or JSON that cannot be rendered as an image."
+        )
+
+    return False, f"Unsupported image source type: {type(image).__name__}"
 
 
 def _image_source_type(image: Any) -> str:
@@ -275,8 +322,9 @@ def image_to_url(
         *  If PathLike object, it will be treated as a file path and
            its content will be converted and embedded in the output URL.
         *  If string is a URL, it will be linked in the output URL.
-        *  Otherwise a string will be assumed to be raw content (JSON, SVG,
-           base64, etc.) and embedded in the output URL.
+        *  If string is SVG markup or naked base64-encoded image binary,
+           it will be wrapped into a proper image data URI.
+        *  Otherwise a string will be safely escaped for embedded output.
         *  If array-like, it will be converted to PNG base64 string and
            embedded in the output URL.
     origin: ['upper' | 'lower'], optional, default 'upper'
@@ -312,7 +360,11 @@ def image_to_url(
         url = f"data:image/{fileformat};base64,{b64encoded}"
     else:
         if isinstance(image, str):
-            url = _raw_to_data_uri(image)
+            renderable = _raw_to_renderable_image_data_uri(image)
+            if renderable is not None:
+                url = renderable
+            else:
+                url = _escape_embedded_string(image)
         else:
             url = json.dumps(image)
 

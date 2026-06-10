@@ -11,7 +11,7 @@ from folium.utilities import (
     JsCode,
     _is_url,
     _image_source_type,
-    _raw_to_data_uri,
+    _is_renderable_image_source,
     camelize,
     deep_copy,
     escape_double_quotes,
@@ -335,28 +335,75 @@ def test_image_source_type_existing_file(tmp_path):
     [
         (_SVG_DATA, "data:image/svg+xml;base64,"),
         (_SVG_DATA_XML, "data:image/svg+xml;base64,"),
-        (_JSON_OBJECT, "data:application/json;base64,"),
-        (_JSON_ARRAY, "data:application/json;base64,"),
         (_PNG_BASE64, "data:image/png;base64,"),
         (_GIF_BASE64, "data:image/gif;base64,"),
     ],
 )
-def test_raw_to_data_uri(raw, expected_prefix):
-    result = _raw_to_data_uri(raw)
-    assert result.startswith(expected_prefix), f"Expected {expected_prefix}, got {result[:60]}"
+def test_raw_to_renderable_image_data_uri(raw, expected_prefix):
+    from folium.utilities import _raw_to_renderable_image_data_uri
+
+    result = _raw_to_renderable_image_data_uri(raw)
+    assert result is not None, f"Expected renderable data URI for {raw[:40]}"
+    assert result.startswith(
+        expected_prefix
+    ), f"Expected {expected_prefix}, got {result[:60]}"
     b64part = result.split(",", 1)[1]
     base64.b64decode(b64part)
 
 
-def test_raw_to_data_uri_plain_text():
-    plain = "hello_world_not_base64"
-    assert _raw_to_data_uri(plain) == plain
+def test_raw_to_renderable_image_data_uri_rejects_json():
+    from folium.utilities import _raw_to_renderable_image_data_uri
+
+    assert _raw_to_renderable_image_data_uri(_JSON_OBJECT) is None
+    assert _raw_to_renderable_image_data_uri(_JSON_ARRAY) is None
 
 
-def test_raw_to_data_uri_invalid_json():
-    not_json = "{not valid json"
-    result = _raw_to_data_uri(not_json)
-    assert not result.startswith("data:application/json;base64,")
+def test_raw_to_renderable_image_data_uri_rejects_plain_text():
+    from folium.utilities import _raw_to_renderable_image_data_uri
+
+    assert _raw_to_renderable_image_data_uri("hello_world") is None
+    assert _raw_to_renderable_image_data_uri("not base64 & spaces") is None
+
+
+def test_raw_to_renderable_image_data_uri_rejects_non_image_base64():
+    from folium.utilities import _raw_to_renderable_image_data_uri
+
+    json_b64 = base64.b64encode(_JSON_OBJECT.encode("utf-8")).decode("ascii")
+    assert _raw_to_renderable_image_data_uri(json_b64) is None
+
+
+@pytest.mark.parametrize(
+    "image,is_valid",
+    [
+        ("https://example.com/img.png", True),
+        ("data:image/png;base64,iVBORw0KGgo=", True),
+        (_SVG_DATA, True),
+        (_PNG_BASE64, True),
+        (np.array([[[1, 0, 0]]]), True),
+        ([[[1, 0, 0]]], True),
+        (_JSON_OBJECT, False),
+        (_JSON_ARRAY, False),
+        ("plain_string", False),
+        ("{not valid json", False),
+    ],
+)
+def test_is_renderable_image_source(image, is_valid):
+    ok, _ = _is_renderable_image_source(image)
+    assert ok is is_valid, f"Expected {is_valid} for input {type(image).__name__}: {str(image)[:40]}"
+
+
+def test_is_renderable_image_source_pathlike_nonexistent():
+    p = Path("/definitely/does/not/exist/12345.png")
+    ok, reason = _is_renderable_image_source(p)
+    assert ok is False
+    assert reason is not None
+
+
+def test_is_renderable_image_source_existing_file(tmp_path):
+    f = tmp_path / "test.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    ok, _ = _is_renderable_image_source(str(f))
+    assert ok is True
 
 
 @pytest.mark.parametrize(
@@ -371,8 +418,12 @@ def test_raw_to_data_uri_invalid_json():
             lambda url: url.startswith("data:image/png;base64,"),
         ),
         (
+            _GIF_BASE64,
+            lambda url: url.startswith("data:image/gif;base64,"),
+        ),
+        (
             _JSON_OBJECT,
-            lambda url: url.startswith("data:application/json;base64,"),
+            lambda url: not url.startswith("data:application/json;base64,"),
         ),
         (
             "https://example.com/img.png",
@@ -391,6 +442,20 @@ def test_raw_to_data_uri_invalid_json():
 def test_image_to_url(image, check_fn):
     result = image_to_url(image)
     assert check_fn(result), f"Failed for input type {type(image).__name__}"
+
+
+def test_image_to_url_plain_text_escaped():
+    plain = 'plain text with "quotes" and \'apostrophes\''
+    result = image_to_url(plain)
+    assert "data:image" not in result
+    assert "data:application/json" not in result
+    assert "\n" not in result
+
+
+def test_image_to_url_json_not_wrapped_as_data_uri():
+    result = image_to_url(_JSON_OBJECT)
+    assert not result.startswith("data:application/json;base64,")
+    assert "Feature" in result
 
 
 def test_image_to_url_existing_file(tmp_path):
