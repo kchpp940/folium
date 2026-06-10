@@ -3,9 +3,7 @@ Leaflet GeoJson and miscellaneous features.
 
 """
 
-import functools
 import json
-import operator
 import warnings
 from collections.abc import Iterable, Sequence
 from typing import (
@@ -31,6 +29,7 @@ from branca.element import (
 from branca.utilities import color_brewer
 
 from folium._data_binding import ChoroplethDataBinder
+from folium._geojson_utils import get_feature_id, resolve_dotted_key
 from folium.elements import JSCSSMixin
 from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
@@ -904,8 +903,7 @@ class GeoJsonStyleMapper:
 
     def get_feature_id(self, feature: dict) -> Union[str, int]:
         """Return a value identifying the feature."""
-        fields = self.feature_identifier.split(".")[1:]
-        value = functools.reduce(operator.getitem, fields, feature)
+        value = get_feature_id(feature, self.feature_identifier)
         assert isinstance(value, (str, int))
         return value
 
@@ -1640,17 +1638,7 @@ class Choropleth(FeatureGroup):
 
     @classmethod
     def _get_by_key(cls, obj: Union[dict, list], key: str) -> Union[float, str, None]:
-        key_parts = key.split(".")
-        first_key_part = key_parts[0]
-        if first_key_part.isdigit():
-            value = obj[int(first_key_part)]
-        else:
-            value = obj.get(first_key_part, None)  # type: ignore
-        if len(key_parts) > 1:
-            new_key = ".".join(key_parts[1:])
-            return cls._get_by_key(value, new_key)
-        else:
-            return value
+        return resolve_dotted_key(obj, key, default_missing=None)
 
     def render(self, **kwargs):
         """Render the GeoJson/TopoJson and color scale objects."""
