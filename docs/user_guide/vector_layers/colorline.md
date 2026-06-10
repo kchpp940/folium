@@ -24,3 +24,7 @@ color_line = folium.ColorLine(
 
 m
 ```
+
+### 事件绑定
+
+`ColorLine` 继承自 `PolyLine`，同样支持通过 `events` 参数绑定交互事件。详见 [事件绑定](../features/event_binding.md) 文档。

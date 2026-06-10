@@ -49,3 +49,21 @@ folium.Circle(
 
 m
 ```
+
+### 事件绑定
+
+`Circle` 和 `CircleMarker` 都支持通过 `events` 参数绑定交互事件（`click`、`mouseover` 等），例如：
+
+```python
+folium.Circle(
+    location=[0, 0],
+    radius=1000,
+    events={
+        "click": "alert",
+        "mouseover": "highlight",
+        "mouseout": "reset_highlight",
+    },
+)
+```
+
+完整的使用说明请参见 [事件绑定](../features/event_binding.md) 文档。

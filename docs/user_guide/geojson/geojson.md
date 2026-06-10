@@ -300,3 +300,34 @@ folium.GeoJson(
 
 m
 ```
+
+### 事件绑定 (Event Binding)
+
+`GeoJson` 支持两级事件绑定，因为一个 GeoJson 图层可以包含多个 feature：
+
+- **Feature 级**（`feature_events`）：事件绑定到每一个 feature，每个州/点/多边形各自响应点击、悬停等
+- **Layer 级**（`layer_events`）：事件绑定到整个 GeoJson 图层，适合监听 `layeradd`、`layerremove` 等生命周期事件
+
+示例：点击每个 feature 弹出它的属性信息，悬停时高亮：
+
+```{code-cell} ipython3
+m = folium.Map([43, -100], zoom_start=4)
+
+folium.GeoJson(
+    geo_json_data,
+    feature_events={
+        "click": "alert",
+        "mouseover": "highlight",
+        "mouseout": "reset_highlight",
+    },
+    layer_events={
+        "layeradd": "log",
+    },
+).add_to(m)
+
+m
+```
+
+> **向后兼容提示**：旧代码使用 `events` 参数（如 `events={"click": "alert"}`）仍然有效，它是 `feature_events` 的别名。为了代码语义更清晰，推荐使用显式的 `feature_events` / `layer_events`。不要同时传两者，否则会抛出 `ValueError`。
+
+有关事件绑定的完整说明（支持的事件列表、处理器格式、与 `add_child(EventHandler)` 的关系等），请参见 [事件绑定](../features/event_binding.md) 文档。
