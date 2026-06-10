@@ -651,6 +651,12 @@ class GeoJson(Layer):
         });
 
         function {{ this.get_name() }}_add (data) {
+            {%- if this._feature_id_map %}
+            var _fid = {{ this._feature_id_map|tojson }};
+            for (var _i = 0; _i < _fid.length; _i++) {
+                data.features[_i]._folium_id = _fid[_i];
+            }
+            {%- endif %}
             {{ this.get_name() }}
                 .addData(data);
         }
@@ -715,6 +721,8 @@ class GeoJson(Layer):
 
         self.data = self.process_data(data)
 
+        self._feature_id_map: list[str | int] | None = None
+
         if self.style or self.highlight:
             if not self.embed:
                 raise ValueError(
@@ -730,9 +738,10 @@ class GeoJson(Layer):
                 self._validate_function(highlight_function, "highlight_function")
                 self.highlight_function = highlight_function
                 self.highlight_map: dict = {}
-            self.feature_identifier = _geojson_utils.resolve_feature_identifier(
-                self.data
-            )
+            (
+                self.feature_identifier,
+                self._feature_id_map,
+            ) = _geojson_utils.resolve_feature_identifier(self.data)
 
         if isinstance(tooltip, (GeoJsonTooltip, Tooltip)):
             self.add_child(tooltip)
@@ -780,11 +789,13 @@ class GeoJson(Layer):
             conversion now happens automatically when a
             FeatureCollection is needed (e.g. style/highlight).
             This method runs the full pipeline: properties
-            normalization → FC conversion → id assignment.
+            normalization → FC conversion → identifier resolution.
         """
         if self.embed:
             _geojson_utils.to_feature_collection(self.data)
-            _geojson_utils.assign_unique_ids(self.data["features"])
+            identifier, id_map = _geojson_utils.resolve_feature_identifier(self.data)
+            self.feature_identifier = identifier
+            self._feature_id_map = id_map
 
     def find_identifier(self) -> str:
         """Find a unique identifier for each feature, create it if needed.
@@ -796,7 +807,10 @@ class GeoJson(Layer):
             pipeline and returns the identifier string.
         """
         if self.embed:
-            return _geojson_utils.resolve_feature_identifier(self.data)
+            identifier, id_map = _geojson_utils.resolve_feature_identifier(self.data)
+            self.feature_identifier = identifier
+            self._feature_id_map = id_map
+            return identifier
         return "feature.id"
 
     def _validate_function(self, func: Callable, name: str) -> None:
@@ -842,7 +856,16 @@ class GeoJson(Layer):
             The feature's unique identifier.
         """
         identifier = getattr(self, "feature_identifier", "feature.id")
-        return _geojson_utils.get_feature_id(feature, identifier)
+        feature_id_map = getattr(self, "_feature_id_map", None)
+        feature_index = None
+        if feature_id_map is not None and self.data.get("type") == "FeatureCollection":
+            try:
+                feature_index = self.data["features"].index(feature)
+            except ValueError:
+                pass
+        return _geojson_utils.get_feature_id(
+            feature, identifier, feature_id_map=feature_id_map, feature_index=feature_index
+        )
 
     def render(self, **kwargs):
         self.parent_map = get_obj_in_upper_tree(self, Map)
@@ -874,6 +897,7 @@ class GeoJsonStyleMapper:
             self.geojson_obj.feature_identifier,
             style_function,
             macro_element_parent=self.geojson_obj,
+            feature_id_map=self.geojson_obj._feature_id_map,
         )
 
     def get_highlight_map(
@@ -884,6 +908,7 @@ class GeoJsonStyleMapper:
             self.geojson_obj.data["features"],
             self.geojson_obj.feature_identifier,
             highlight_function,
+            feature_id_map=self.geojson_obj._feature_id_map,
         )
 
 

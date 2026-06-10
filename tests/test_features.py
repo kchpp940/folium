@@ -181,10 +181,14 @@ def test_geojson_find_identifier():
             ],
         }
 
-    def _assert_id_got_added(data):
+    def _assert_synthetic_id_generated(data):
         _geojson = GeoJson(data)
-        assert _geojson.find_identifier() == "feature.id"
-        assert _geojson.data["features"][0]["id"] == "0"
+        assert _geojson.find_identifier() == "feature._folium_id"
+        assert _geojson._feature_id_map is not None
+        assert _geojson._feature_id_map[0] == "0"
+        assert "id" not in _geojson.data["features"][0] or not isinstance(
+            _geojson.data["features"][0].get("id"), str
+        ) or _geojson.data["features"][0].get("id") != "0"
 
     data_with_id = _create(None, None)
     data_with_id["features"][0]["id"] = "this-is-an-id"
@@ -214,33 +218,33 @@ def test_geojson_find_identifier():
     data_with_identical_ids = _create(None, None)
     data_with_identical_ids["features"][0]["id"] = "identical-ids"
     data_with_identical_ids["features"][1]["id"] = "identical-ids"
-    _assert_id_got_added(data_with_identical_ids)
+    _assert_synthetic_id_generated(data_with_identical_ids)
 
     data_with_some_missing_ids = _create(None, None)
     data_with_some_missing_ids["features"][0]["id"] = "this-is-an-id"
     # the second feature doesn't have an id
-    _assert_id_got_added(data_with_some_missing_ids)
+    _assert_synthetic_id_generated(data_with_some_missing_ids)
 
     data_with_identical_properties = _create(
         {"property-key": "identical-value"},
         {"property-key": "identical-value"},
     )
-    _assert_id_got_added(data_with_identical_properties)
+    _assert_synthetic_id_generated(data_with_identical_properties)
 
     data_bare = _create(None)
-    _assert_id_got_added(data_bare)
+    _assert_synthetic_id_generated(data_bare)
 
     data_empty_dict = _create({})
-    _assert_id_got_added(data_empty_dict)
+    _assert_synthetic_id_generated(data_empty_dict)
 
     data_without_properties = _create(None)
     del data_without_properties["features"][0]["properties"]
-    _assert_id_got_added(data_without_properties)
+    _assert_synthetic_id_generated(data_without_properties)
 
     data_some_without_properties = _create({"key": "value"}, "will be deleted")
     # the first feature has properties, but the second doesn't
     del data_some_without_properties["features"][1]["properties"]
-    _assert_id_got_added(data_some_without_properties)
+    _assert_synthetic_id_generated(data_some_without_properties)
 
     data_with_nested_properties = _create(
         {
@@ -248,7 +252,7 @@ def test_geojson_find_identifier():
             "way_points": [3, 5],
         }
     )
-    _assert_id_got_added(data_with_nested_properties)
+    _assert_synthetic_id_generated(data_with_nested_properties)
 
     data_with_incompatible_properties = _create(
         {
@@ -256,7 +260,7 @@ def test_geojson_find_identifier():
             "way_points": [3, 5],
         }
     )
-    _assert_id_got_added(data_with_incompatible_properties)
+    _assert_synthetic_id_generated(data_with_incompatible_properties)
 
     data_loose_geometry = {
         "type": "LineString",
@@ -271,8 +275,10 @@ def test_geojson_find_identifier():
     }
     geojson = GeoJson(data_loose_geometry)
     geojson.convert_to_feature_collection()
-    assert geojson.find_identifier() == "feature.id"
-    assert geojson.data["features"][0]["id"] == "0"
+    assert geojson.find_identifier() == "feature._folium_id"
+    assert geojson._feature_id_map is not None
+    assert geojson._feature_id_map[0] == "0"
+    assert "id" not in geojson.data["features"][0]
 
 
 def test_geojson_empty_features_with_styling():

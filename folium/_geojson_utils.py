@@ -93,24 +93,18 @@ def to_feature_collection(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage 3 — synthetic id assignment
+# Stage 3 — synthetic id generation (does NOT write into features)
 # ---------------------------------------------------------------------------
 
 
-def assign_unique_ids(features: list[dict]) -> None:
-    """Assign deterministic synthetic ids to every feature.
+def generate_synthetic_ids(n: int) -> list[str]:
+    """Return a list of deterministic synthetic ids of length *n*.
 
-    When this function is called (because at least one feature lacks a valid
-    unique id), **all** features receive a fresh synthetic id so the mapping
-    is fully deterministic and stable.  Internal ids are stringified integers
-    starting from ``"0"``.
-
-    Operates **in place** on the ``features`` list.
+    The ids are stringified integers ``["0", "1", …]``.  They are **not**
+    written into any feature dict — they exist only as a private mapping
+    that the rendering pipeline uses on the JS side.
     """
-    if not features:
-        return
-    for idx, feat in enumerate(features):
-        feat["id"] = str(idx)
+    return [str(i) for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -118,18 +112,19 @@ def assign_unique_ids(features: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_feature_identifier(data: dict) -> str:
+def resolve_feature_identifier(data: dict) -> tuple[str, list[str | int] | None]:
     """Choose the most appropriate Javascript identifier expression.
 
-    Returns, in priority order:
+    Returns a ``(identifier_expr, feature_id_map)`` tuple:
 
-    1. ``"feature.id"`` — when the user supplied valid unique ids on every
-       feature.
-    2. ``"feature.properties.<key>"`` — when a single property key holds
-       unique str/int values on every feature (preferred over generating
-       synthetic ids because it preserves the user's natural identifier).
-    3. ``"feature.id"`` — fallback: synthetic ids are assigned via
-       :func:`assign_unique_ids` before returning.
+    * ``("feature.id", None)`` — when the user supplied valid unique ids
+      on every feature.
+    * ``("feature.properties.<key>", None)`` — when a single property key
+      holds unique str/int values on every feature.
+    * ``("feature._folium_id", ["0", "1", ...])`` — fallback: no natural
+      identifier exists, so synthetic ids are generated and returned as a
+      private mapping.  The mapping is **never** written into the GeoJSON
+      data; the JS template injects ``feature._folium_id`` at render time.
 
     Automatically runs :func:`to_feature_collection` first so callers don't
     have to chain stages manually.
@@ -138,7 +133,7 @@ def resolve_feature_identifier(data: dict) -> str:
     feats = data["features"]
 
     if not feats:
-        return "feature.id"
+        return ("feature.id", None)
 
     user_supplied_ids = [
         feat.get("id")
@@ -148,7 +143,7 @@ def resolve_feature_identifier(data: dict) -> str:
     if len(user_supplied_ids) == len(feats) and len(set(user_supplied_ids)) == len(
         feats
     ):
-        return "feature.id"
+        return ("feature.id", None)
 
     first_props = feats[0].get("properties")
     if isinstance(first_props, dict) and first_props:
@@ -166,10 +161,10 @@ def resolve_feature_identifier(data: dict) -> str:
                     break
                 values.append(val)
             if all_valid and len(set(values)) == len(feats):
-                return f"feature.properties.{key}"
+                return (f"feature.properties.{key}", None)
 
-    assign_unique_ids(feats)
-    return "feature.id"
+    id_map = generate_synthetic_ids(len(feats))
+    return ("feature._folium_id", id_map)
 
 
 # ---------------------------------------------------------------------------
@@ -178,13 +173,16 @@ def resolve_feature_identifier(data: dict) -> str:
 
 
 def get_feature_id(
-    feature: dict, identifier: str = "feature.id"
+    feature: dict,
+    identifier: str = "feature.id",
+    feature_id_map: list[str | int] | None = None,
+    feature_index: int | None = None,
 ) -> str | int:
     """Return the unique identifier value for a feature.
 
-    The identifier is resolved using the same field-path logic that the
-    rendered Javascript uses, so the Python and JS sides always agree on
-    how to identify a feature.
+    When *feature_id_map* is provided (synthetic-id case), the id is
+    looked up by *feature_index* instead of walking the feature dict.
+    This keeps synthetic ids out of the GeoJSON payload entirely.
 
     Parameters
     ----------
@@ -193,18 +191,22 @@ def get_feature_id(
     identifier: str
         A dotted path such as ``"feature.id"`` or
         ``"feature.properties.name"``.
+    feature_id_map: list or None
+        Private mapping from feature index to synthetic id, as returned
+        by :func:`resolve_feature_identifier`.
+    feature_index: int or None
+        Index of the feature within the FeatureCollection's features
+        list.  Required when *feature_id_map* is not None.
 
     Returns
     -------
     str or int
         The feature's unique identifier.
-
-    Raises
-    ------
-    AssertionError
-        If the resolved value is not a scalar (str/int), which indicates
-        the data was not properly normalized before calling this function.
     """
+    if feature_id_map is not None:
+        assert feature_index is not None
+        return feature_id_map[feature_index]
+
     fields = identifier.split(".")[1:]
     value: Any = feature
     for field in fields:
@@ -247,6 +249,7 @@ def build_style_mapping(
     identifier: str,
     style_function: Callable[[dict], dict],
     macro_element_parent: Any | None = None,
+    feature_id_map: list[str | int] | None = None,
 ) -> TypeStyleMapping:
     """Build the mapping from serialized style → list of feature ids.
 
@@ -262,6 +265,11 @@ def build_style_mapping(
     macro_element_parent:
         Optional Folium element used as parent for any ``MacroElement``
         values found inside style dicts (e.g. ``Icon`` references).
+    feature_id_map:
+        Optional private mapping from feature index to synthetic id.
+        When provided, ids are looked up by index instead of walking
+        the feature dict, keeping synthetic ids out of the GeoJSON
+        payload.
 
     Returns
     -------
@@ -270,7 +278,7 @@ def build_style_mapping(
         ``GeoJson.highlight_map``.
     """
     mapping: TypeStyleMapping = {}
-    for feature in features:
+    for idx, feature in enumerate(features):
         content = style_function(feature)
         if macro_element_parent is not None:
             for key, value in content.items():
@@ -280,7 +288,9 @@ def build_style_mapping(
                         value.render()
                     content[key] = "{{'" + value.get_name() + "'}}"
         key = _style_to_key(content)
-        feature_id = get_feature_id(feature, identifier)
+        feature_id = get_feature_id(
+            feature, identifier, feature_id_map=feature_id_map, feature_index=idx
+        )
         mapping.setdefault(key, []).append(feature_id)  # type: ignore
     _set_default_key(mapping)
     return mapping
