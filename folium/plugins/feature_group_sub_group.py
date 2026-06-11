@@ -69,28 +69,8 @@ class FeatureGroupSubGroup(JSCSSMixin, Layer):
         ),
     ]
 
-    def __init__(
-        self,
-        group,
-        name=None,
-        overlay=True,
-        control=True,
-        show=True,
-        control_order=0,
-        control_group=None,
-        control_disabled=False,
-        control_collapsed=False,
-    ):
-        super().__init__(
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
-            control_order=control_order,
-            control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+    def __init__(self, group, name=None, overlay=True, control=True, show=True):
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
 
         self._group = group
         self._name = "FeatureGroupSubGroup"

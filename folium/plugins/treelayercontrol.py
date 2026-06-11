@@ -3,7 +3,6 @@ from typing import Union
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.layer_control_model import LayerControlModel
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -158,49 +157,5 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         kwargs["expand_all"] = expand_all
         kwargs["label_is_selector"] = label_is_selector
         self.options = remove_empty(**kwargs)
-        self._base_tree_raw = base_tree
-        self._overlay_tree_raw = overlay_tree
-        self.base_tree = None
-        self.overlay_tree = None
-        self._claimed_set_cache: set | None = None
-
-    def _build_model_and_claim(self, parent):
-        if self._claimed_set_cache is not None:
-            return self._claimed_set_cache
-
-        from folium.map import Layer as LayerCls
-
-        model = LayerControlModel.from_map_children(parent)
-        model.deduplicate()
-        model.sort_by_weight()
-
-        self.base_tree = model.normalize_tree(
-            self._base_tree_raw, is_overlay=False
-        )
-        self.overlay_tree = model.normalize_tree(
-            self._overlay_tree_raw, is_overlay=True
-        )
-
-        claimed = set()
-
-        def collect(node):
-            if node is None:
-                return
-            if isinstance(node, list):
-                for n in node:
-                    collect(n)
-            elif isinstance(node, dict):
-                layer_obj = node.get("layer")
-                if isinstance(layer_obj, LayerCls):
-                    claimed.add(layer_obj)
-                for child in node.get("children", []):
-                    collect(child)
-
-        collect(self.base_tree)
-        collect(self.overlay_tree)
-        self._claimed_set_cache = claimed
-        return claimed
-
-    def render(self, **kwargs):
-        self._build_model_and_claim(self._parent)
-        super().render()
+        self.base_tree = base_tree
+        self.overlay_tree = overlay_tree

@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.raster_layers import TileLayer
 from folium.template import Template
 from folium.utilities import remove_empty
@@ -73,18 +74,19 @@ class MiniMap(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)  # noqa
 
-    default_js = [
-        (
-            "Control_MiniMap_js",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.js",
-        )
-    ]
-    default_css = [
-        (
-            "Control_MiniMap_css",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.css",
+    resources = [
+        Resource(
+            name="Control_MiniMap_js",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.js",
+            type="js",
+        ),
+        Resource(
+            name="Control_MiniMap_css",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.css",
+            type="css",
         ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

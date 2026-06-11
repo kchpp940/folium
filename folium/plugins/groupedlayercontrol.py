@@ -1,9 +1,6 @@
-from collections import OrderedDict
-
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.layer_control_model import LayerControlModel
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -16,11 +13,7 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
     ----------
     groups : dict
         A dictionary where the keys are group names and the values are lists
-        of layer objects. Layers in these lists take the given group name
-        as an override. If a layer's ``control_group`` attribute already
-        matches the top-level group name, you can omit it from ``groups``
-        entirely — the control will automatically group them by the
-        ``control_group`` first path segment. Example::
+        of layer objects. For example::
 
             {
                 "Group 1": [layer1, layer2],
@@ -78,51 +71,20 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         self.options = remove_empty(**kwargs)
         if exclusive_groups:
             self.options["exclusiveGroups"] = list(groups.keys())
-        self._groups = groups
-        self._exclusive_groups = exclusive_groups
-        self.grouped_overlays: OrderedDict[str, OrderedDict[str, str]] = (
-            OrderedDict()
-        )
-        self.layers_untoggle: set = set()
-        self._claimed_set_cache: set | None = None
-
-    def _build_model_and_claim(self, parent):
-        if self._claimed_set_cache is not None:
-            return self._claimed_set_cache
-
-        model = LayerControlModel.from_map_children(parent)
-        model.deduplicate()
-        model.sort_by_weight()
-
-        self.grouped_overlays, group_order = model.as_grouped_dicts(
-            explicit_groups=self._groups,
-            exclusive_groups=self._exclusive_groups,
-        )
-        if self._exclusive_groups:
-            self.options["exclusiveGroups"] = group_order
-
         self.layers_untoggle = set()
-        js_to_entry = {e.js_name: e for e in model.entries}
-        claimed = set()
-
-        for overlays_dict in self.grouped_overlays.values():
-            for label, js_name in overlays_dict.items():
-                entry = js_to_entry.get(js_name)
-                if entry is not None:
-                    claimed.add(entry.layer)
-
-        for entry in model.entries:
-            if not entry.is_visible or entry.is_disabled:
-                self.layers_untoggle.add(entry.js_name)
-
-        if self._exclusive_groups:
-            for sublist in self._groups.values():
+        self.grouped_overlays = {}
+        for group_name, sublist in groups.items():
+            self.grouped_overlays[group_name] = {}
+            for element in sublist:
+                self.grouped_overlays[group_name][
+                    element.layer_name
+                ] = element.get_name()
+                if not element.show:
+                    self.layers_untoggle.add(element.get_name())
+                # make sure the elements used in GroupedLayerControl
+                # don't show up in the regular LayerControl.
+                element.control = False
+            if exclusive_groups:
+                # only enable the first radio button
                 for element in sublist[1:]:
                     self.layers_untoggle.add(element.get_name())
-
-        self._claimed_set_cache = claimed
-        return claimed
-
-    def render(self, **kwargs):
-        self._build_model_and_claim(self._parent)
-        super().render()

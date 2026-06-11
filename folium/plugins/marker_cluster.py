@@ -1,5 +1,6 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer, Marker
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty, validate_locations
 
@@ -55,23 +56,24 @@ class MarkerCluster(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "markerclusterjs",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
-        )
-    ]
-
-    default_css = [
-        (
-            "markerclustercss",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
+    resources = [
+        Resource(
+            name="markerclusterjs",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
+            type="js",
         ),
-        (
-            "markerclusterdefaultcss",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
+        Resource(
+            name="markerclustercss",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
+            type="css",
+        ),
+        Resource(
+            name="markerclusterdefaultcss",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
+            type="css",
         ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,
@@ -86,21 +88,9 @@ class MarkerCluster(JSCSSMixin, Layer):
         options=None,
         **kwargs,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
         if options is not None:
-            kwargs.update(options)
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+            kwargs.update(options)  # options argument is legacy
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "MarkerCluster"
 
         if locations is not None:

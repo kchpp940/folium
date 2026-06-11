@@ -107,16 +107,6 @@ class TileLayer(Layer):
         opacity: float = 1,
         **kwargs,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
         if isinstance(tiles, str):
             if tiles.lower() == "openstreetmap":
                 tiles = "OpenStreetMap Mapnik"
@@ -141,11 +131,7 @@ class TileLayer(Layer):
             name if name is not None else "".join(tiles.lower().strip().split())
         )
         super().__init__(
-            name=self.tile_name,
-            overlay=overlay,
-            control=control,
-            show=show,
-            **_ctrl,
+            name=self.tile_name, overlay=overlay, control=control, show=show
         )
         self._name = "TileLayer"
 
@@ -228,19 +214,7 @@ class WmsTileLayer(Layer):
         show: bool = True,
         **kwargs,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self.url = url
         kwargs["format"] = fmt
         cql_filter = kwargs.pop("cql_filter", None)
@@ -347,19 +321,7 @@ class ImageOverlay(Layer):
         show: bool = True,
         **kwargs,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "ImageOverlay"
         self.bounds = bounds
         self.options = remove_empty(**kwargs)
@@ -429,19 +391,7 @@ class VideoOverlay(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "VideoOverlay"
         self.video_url = video_url
 

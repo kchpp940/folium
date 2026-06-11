@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -35,18 +36,19 @@ class Fullscreen(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)  # noqa
 
-    default_js = [
-        (
-            "Control.Fullscreen.js",
-            "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.min.js",
-        )
+    resources = [
+        Resource(
+            name="Control.Fullscreen.js",
+            url="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.min.js",
+            type="js",
+        ),
+        Resource(
+            name="Control.FullScreen.css",
+            url="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.css",
+            type="css",
+        ),
     ]
-    default_css = [
-        (
-            "Control.FullScreen.css",
-            "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

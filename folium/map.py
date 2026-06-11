@@ -111,19 +111,6 @@ class Layer(Evented):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int, default 0
-        Sort weight for the layer within LayerControls. Lower values appear
-        first.
-    control_group : str, default None
-        Group name for the layer in LayerControls. Used by
-        GroupedLayerControl and can be read by LayerControlModel to organize
-        overlays into groups.
-    control_disabled : bool, default False
-        Whether the layer entry is disabled (visible but not toggleable) in
-        LayerControls.
-    control_collapsed : bool, default False
-        Whether the layer's group or tree node is collapsed initially in
-        LayerControls.
     """
 
     def __init__(
@@ -132,20 +119,12 @@ class Layer(Evented):
         overlay: bool = False,
         control: bool = True,
         show: bool = True,
-        control_order: int = 0,
-        control_group: Optional[str] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
     ):
         super().__init__()
         self.layer_name = name if name is not None else self.get_name()
         self.overlay = overlay
         self.control = control
         self.show = show
-        self.control_order = control_order
-        self.control_group = control_group
-        self.control_disabled = control_disabled
-        self.control_collapsed = control_collapsed
 
     def render(self, **kwargs):
         if self.show:
@@ -200,19 +179,7 @@ class FeatureGroup(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "FeatureGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
@@ -263,19 +230,7 @@ class LayerGroup(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "LayerGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
@@ -365,13 +320,14 @@ class LayerControl(MacroElement):
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
         self.reset()
-        from folium.layer_control_model import LayerControlModel, collect_excluded_layers
-
-        exclude = collect_excluded_layers(self._parent)
-        model = LayerControlModel.from_map_children(self._parent, exclude=exclude)
-        model.deduplicate()
-        model.sort_by_weight()
-        self.base_layers, self.overlays = model.as_flat_dicts()
+        for item in self._parent._children.values():
+            if not isinstance(item, Layer) or not item.control:
+                continue
+            key = item.layer_name
+            if not item.overlay:
+                self.base_layers[key] = item.get_name()
+            else:
+                self.overlays[key] = item.get_name()
         super().render()
 
 

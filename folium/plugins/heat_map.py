@@ -4,6 +4,7 @@ import numpy as np
 
 from folium.elements import JSCSSMixin
 from folium.map import Layer
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import (
     if_pandas_df_convert_to_numpy,
@@ -54,12 +55,14 @@ class HeatMap(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "leaflet-heat.js",
-            "https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js",
+    resources = [
+        Resource(
+            name="leaflet-heat.js",
+            url="https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js",
+            type="js",
         ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,
@@ -75,19 +78,7 @@ class HeatMap(JSCSSMixin, Layer):
         show=True,
         **kwargs,
     ):
-        _ctrl = {
-            k: kwargs.pop(k)
-            for k in (
-                "control_order",
-                "control_group",
-                "control_disabled",
-                "control_collapsed",
-            )
-            if k in kwargs
-        }
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show, **_ctrl
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "HeatMap"
         data = if_pandas_df_convert_to_numpy(data)
         self.data = [
