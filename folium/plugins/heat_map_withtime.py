@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 from folium.elements import JSCSSMixin
 from folium.map import Layer
 from folium.template import Template
@@ -56,14 +54,6 @@ class HeatMapWithTime(JSCSSMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
 
     """
 
@@ -242,17 +232,8 @@ class HeatMapWithTime(JSCSSMixin, Layer):
         overlay=True,
         control=True,
         show=True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
     ):
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "HeatMap"
         self._control_name = self.get_name() + "Control"
 

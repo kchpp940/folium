@@ -74,14 +74,6 @@ class TileLayer(Layer):
         services).
     opacity: float, default 1
         Sets the opacity for the layer.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
     **kwargs : additional keyword arguments
         Other keyword arguments are passed as options to the Leaflet tileLayer
         object.
@@ -113,10 +105,6 @@ class TileLayer(Layer):
         subdomains: str = "abc",
         tms: bool = False,
         opacity: float = 1,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         **kwargs,
     ):
         if isinstance(tiles, str):
@@ -143,10 +131,7 @@ class TileLayer(Layer):
             name if name is not None else "".join(tiles.lower().strip().split())
         )
         super().__init__(
-            name=self.tile_name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
+            name=self.tile_name, overlay=overlay, control=control, show=show
         )
         self._name = "TileLayer"
 
@@ -197,14 +182,6 @@ class WmsTileLayer(Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
     **kwargs : additional keyword arguments
         Passed through to the underlying tileLayer.wms object and can be used
         for setting extra tileLayer.wms parameters or as extra parameters in
@@ -235,18 +212,9 @@ class WmsTileLayer(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         **kwargs,
     ):
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self.url = url
         kwargs["format"] = fmt
         cql_filter = kwargs.pop("cql_filter", None)
@@ -307,14 +275,6 @@ class ImageOverlay(Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
 
     See https://leafletjs.com/reference.html#imageoverlay for more
     options.
@@ -359,18 +319,9 @@ class ImageOverlay(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         **kwargs,
     ):
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "ImageOverlay"
         self.bounds = bounds
         self.options = remove_empty(**kwargs)
@@ -412,14 +363,6 @@ class VideoOverlay(Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
     **kwargs:
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#videooverlay
@@ -446,18 +389,9 @@ class VideoOverlay(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "VideoOverlay"
         self.video_url = video_url
 

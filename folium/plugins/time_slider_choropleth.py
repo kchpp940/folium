@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 from folium.elements import JSCSSMixin
 from folium.features import GeoJson
 from folium.map import Layer
@@ -32,14 +30,6 @@ class TimeSliderChoropleth(JSCSSMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
     init_timestamp: int, default 0
         Initial time-stamp index on the slider. Must be in the range
         `[-L, L-1]`, where `L` is the maximum number of time stamps in
@@ -187,21 +177,12 @@ class TimeSliderChoropleth(JSCSSMixin, Layer):
         overlay=True,
         control=True,
         show=True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         init_timestamp=0,
         stroke_opacity=1,
         stroke_width=0.8,
         stroke_color="#FFFFFF",
     ):
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self.data = GeoJson.process_data(GeoJson({}), data)
         self.date_format = date_options
         self.highlight = highlight

@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 from folium.elements import JSCSSMixin
 from folium.map import Layer, Marker
 from folium.template import Template
@@ -26,14 +24,6 @@ class MarkerCluster(JSCSSMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    control_order : int or float, default None
-        See :class:`folium.map.Layer`.
-    control_group : str or list of str, default None
-        See :class:`folium.map.Layer`.
-    control_disabled : bool, default False
-        See :class:`folium.map.Layer`.
-    control_collapsed : bool, default False
-        See :class:`folium.map.Layer`.
     icon_create_function : string, default None
         Override the default behaviour, making possible to customize
         markers colors and sizes.
@@ -92,22 +82,13 @@ class MarkerCluster(JSCSSMixin, Layer):
         overlay=True,
         control=True,
         show=True,
-        control_order: Optional[Union[int, float]] = None,
-        control_group: Optional[Union[str, list[str]]] = None,
-        control_disabled: bool = False,
-        control_collapsed: bool = False,
         icon_create_function=None,
         options=None,
         **kwargs,
     ):
         if options is not None:
             kwargs.update(options)  # options argument is legacy
-        super().__init__(
-            name=name, overlay=overlay, control=control, show=show,
-            control_order=control_order, control_group=control_group,
-            control_disabled=control_disabled,
-            control_collapsed=control_collapsed,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "MarkerCluster"
 
         if locations is not None:
