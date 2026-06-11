@@ -41,14 +41,17 @@ from folium.map import (
     Popup,
     Tooltip,
 )
-from folium.raster_layers import (
-    LayerMetadata,
-    LegendItem,
-    TileLayer,
-    WmsTileLayer,
-    normalize_layer_metadata,
+from folium.raster_layers import TileLayer, WmsTileLayer
+from folium.utilities import (
+    JsCode,
+    ResourceMode,
+    clear_resource_overrides,
+    get_local_path,
+    get_resource_mode,
+    get_resource_override,
+    set_resource_mode,
+    set_resource_override,
 )
-from folium.utilities import JsCode
 from folium.vector_layers import Circle, CircleMarker, Polygon, PolyLine, Rectangle
 
 try:
@@ -96,8 +99,6 @@ __all__ = [
     "LatLngPopup",
     "LayerControl",
     "LayerGroup",
-    "LayerMetadata",
-    "LegendItem",
     "LinearColormap",
     "Link",
     "MacroElement",
@@ -105,6 +106,7 @@ __all__ = [
     "Marker",
     "Popup",
     "RegularPolygonMarker",
+    "ResourceMode",
     "StepColormap",
     "TileLayer",
     "Tooltip",
@@ -112,7 +114,13 @@ __all__ = [
     "Vega",
     "VegaLite",
     "WmsTileLayer",
-    "normalize_layer_metadata",
+    # Resource management
+    "clear_resource_overrides",
+    "get_local_path",
+    "get_resource_mode",
+    "get_resource_override",
+    "set_resource_mode",
+    "set_resource_override",
     # vector_layers
     "Circle",
     "CircleMarker",

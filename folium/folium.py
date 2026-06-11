@@ -155,6 +155,18 @@ class Map(JSCSSMixin, Evented):
     font_size : int or float or string (default: '1rem')
         The font size to use for Leaflet, can either be a number or a
         string ending in 'rem', 'em', or 'px'.
+    resource_mode : str, default None
+        Controls how JS/CSS resources are loaded. Options:
+
+        - ``"cdn"``: Load from CDN URLs (default, backwards compatible)
+        - ``"inline"``: Download resources and inline them directly into HTML
+        - ``"local"``: Use locally cached resource files from ``local_path``
+
+        If None, falls back to the global setting (see :func:`folium.set_resource_mode`).
+    local_path : str, default None
+        Directory path where local resource files are stored. Required when
+        ``resource_mode="local"``. Ignored for other modes.
+        If None, falls back to the global setting.
     **kwargs
         Additional keyword arguments are passed to Leaflets Map class:
         https://leafletjs.com/reference.html#map
@@ -292,9 +304,11 @@ class Map(JSCSSMixin, Evented):
         png_enabled: bool = False,
         zoom_control: Union[bool, str] = True,
         font_size: str = "1rem",
+        resource_mode: Optional[str] = None,
+        local_path: Optional[str] = None,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__()
+        JSCSSMixin.__init__(self, resource_mode=resource_mode, local_path=local_path)
         self._name = "Map"
 
         self._png_image: Optional[bytes] = None

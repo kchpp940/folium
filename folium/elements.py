@@ -1,6 +1,8 @@
+import base64
+import os
 from functools import wraps
-from typing import Any, Optional, TypedDict, Union
-import json
+from typing import Optional
+from urllib.parse import urlparse
 
 from branca.element import (
     CssLink,
@@ -9,172 +11,17 @@ from branca.element import (
     JavascriptLink,
     MacroElement,
 )
+from jinja2 import Template as JinjaTemplate
 
 from folium.template import Template
-from folium.utilities import JsCode, camelize
-
-
-class LegendItem(TypedDict, total=False):
-    """
-    A single item in a legend color bar.
-
-    Use this to define legend entries for raster layer captions.
-    Each item is rendered as a color swatch followed by its label.
-
-    Parameters
-    ----------
-    label : str
-        The text label describing this legend entry.
-    color : str
-        CSS color value for the swatch, e.g. ``"#ff0000"``, ``"red"``,
-        ``"rgba(255,0,0,0.5)"``.
-
-    Examples
-    --------
-    >>> LegendItem(label="High", color="#ff0000")
-    {'label': 'High', 'color': '#ff0000'}
-    """
-
-    label: str
-    color: str
-
-
-class LayerMetadata(TypedDict, total=False):
-    """
-    Typed structure for raster layer metadata and legend captions.
-
-    All caption-enabled raster layers (``ImageOverlay``, ``VideoOverlay``,
-    ``TileLayer``, ``FloatImage``) accept this structure through their
-    ``caption`` parameter.  Pass either a plain ``dict`` with matching keys
-    or a ``LayerMetadata`` instance.
-
-    The Map maintains a single unified CaptionRegistry control: when
-    multiple layers are visible at once their metadata sections are
-    merged in order, and LayerControl toggles are automatically wired to
-    show/hide the corresponding section.
-
-    Parameters
-    ----------
-    title : str, optional
-        Short title shown in bold at the top of the section.
-    description : str, optional
-        One-paragraph description of the dataset.
-    unit : str, optional
-        Unit of measurement, e.g. ``"°C"``, ``"m/s"``, ``"kg/m³"``.
-    resolution : str, optional
-        Spatial or temporal resolution, e.g. ``"1km"``, ``"30m"``,
-        ``"daily"``.
-    source_url : str, optional
-        URL linking to the original data source.
-    source_text : str, optional
-        Human-readable label for ``source_url``; if omitted the URL
-        itself is displayed.
-    updated_time : str, optional
-        Free-form last-updated string, e.g. ``"2024-01-15"``.
-    copyright : str, optional
-        Copyright / attribution line rendered in small italic type.
-    legend : list of :class:`LegendItem`, optional
-        Color-bar legend.  Each entry must have at least the keys
-        ``"label"`` and ``"color"``.
-    position : str, default ``"bottomright"``
-        Leaflet control position.  One of ``"topleft"``, ``"topright"``,
-        ``"bottomleft"``, ``"bottomright"``.  Only the first registered
-        layer's position is used (Map-level singleton).
-    collapsible : bool, default ``True``
-        Whether the panel can be collapsed with a toggle button.
-        Only the first registered layer's value is used.
-    collapsed : bool, default ``False``
-        Whether the panel starts collapsed.
-        Only the first registered layer's value is used.
-
-    See Also
-    --------
-    folium.raster_layers.ImageOverlay
-    folium.raster_layers.VideoOverlay
-    folium.raster_layers.TileLayer
-    folium.plugins.FloatImage
-    normalize_layer_metadata : validation and defaults applied internally
-    """
-
-    title: str
-    description: str
-    unit: str
-    resolution: str
-    source_url: str
-    source_text: str
-    updated_time: str
-    copyright: str
-    legend: list[LegendItem]
-    collapsible: bool
-    collapsed: bool
-    position: str
-
-
-_VALID_POSITIONS = frozenset({
-    "topleft", "topright", "bottomleft", "bottomright",
-})
-
-
-def normalize_layer_metadata(meta: Union[LayerMetadata, dict, None]) -> Optional[dict]:
-    """将任意 metadata 输入规范化为统一格式。
-
-    - 过滤 None 值
-    - 校验 legend 项结构
-    - 规范化 position 到 Leaflet 合法值
-    - 填充 collapsible / collapsed / position 默认值
-
-    Parameters
-    ----------
-    meta : LayerMetadata or dict or None
-        原始元数据。
-
-    Returns
-    -------
-    dict or None
-        规范化后的元数据；输入为 None 时返回 None。
-    """
-    if meta is None:
-        return None
-
-    result: dict[str, Any] = {}
-
-    for key in (
-        "title", "description", "unit", "resolution",
-        "source_url", "source_text", "updated_time", "copyright",
-    ):
-        value = meta.get(key)
-        if value is not None:
-            result[key] = value
-
-    legend = meta.get("legend")
-    if legend is not None:
-        if not isinstance(legend, list):
-            raise TypeError(
-                f"caption['legend'] must be a list, got {type(legend).__name__}"
-            )
-        validated = []
-        for i, item in enumerate(legend):
-            if not isinstance(item, dict) or "label" not in item or "color" not in item:
-                raise ValueError(
-                    f"caption['legend'][{i}] must contain 'label' and 'color' keys, "
-                    f"got {item!r}"
-                )
-            validated.append({"label": item["label"], "color": item["color"]})
-        if validated:
-            result["legend"] = validated
-
-    position = meta.get("position", "bottomright")
-    if position not in _VALID_POSITIONS:
-        raise ValueError(
-            f"caption['position'] must be one of {sorted(_VALID_POSITIONS)}, "
-            f"got {position!r}"
-        )
-    result["position"] = position
-
-    result["collapsible"] = bool(meta.get("collapsible", True))
-    result["collapsed"] = bool(meta.get("collapsed", False))
-
-    return result
+from folium.utilities import (
+    ResourceMode,
+    JsCode,
+    camelize,
+    get_local_path,
+    get_resource_mode,
+    get_resource_override,
+)
 
 
 def leaflet_method(fn):
@@ -185,11 +32,159 @@ def leaflet_method(fn):
     return inner
 
 
+def _url_to_filename(url: str) -> str:
+    path = urlparse(url).path
+    return os.path.basename(path)
+
+
+def _read_file_to_base64(filepath: str) -> str:
+    with open(filepath, "rb") as f:
+        content = f.read()
+    return base64.b64encode(content).decode("ascii")
+
+
+class InlineJavascriptLink(JavascriptLink):
+    """JavascriptLink that always embeds content regardless of render kwargs."""
+
+    _template = JinjaTemplate(
+        "<script>{{this._get_code_str()}}</script>"
+    )
+
+    def __init__(self, url: str = "", download: bool = True, content: Optional[str] = None):
+        has_content = content is not None
+        if has_content:
+            download = False
+        super().__init__(url=url, download=download)
+        if has_content:
+            self.code = content.encode("utf-8")
+
+    def _get_code_str(self) -> str:
+        code = self.get_code()
+        if isinstance(code, bytes):
+            return code.decode("utf-8")
+        return str(code)
+
+
+class InlineCssLink(CssLink):
+    """CssLink that always embeds content regardless of render kwargs."""
+
+    _template = JinjaTemplate(
+        "<style>{{this._get_code_str()}}</style>"
+    )
+
+    def __init__(self, url: str = "", download: bool = True, content: Optional[str] = None):
+        has_content = content is not None
+        if has_content:
+            download = False
+        super().__init__(url=url, download=download)
+        if has_content:
+            self.code = content.encode("utf-8")
+
+    def _get_code_str(self) -> str:
+        code = self.get_code()
+        if isinstance(code, bytes):
+            return code.decode("utf-8")
+        return str(code)
+
+
+def _resolve_resource(
+    name: str,
+    url: str,
+    resource_mode: str,
+    resource_type: str,
+    local_path: Optional[str] = None,
+) -> tuple[type, str, dict]:
+    """Resolve a resource to the appropriate Link class and parameters.
+
+    Parameters
+    ----------
+    resource_type : str
+        Either "js" or "css".
+    """
+    is_css = resource_type == "css"
+    RemoteLinkCls = CssLink if is_css else JavascriptLink
+    InlineLinkCls = InlineCssLink if is_css else InlineJavascriptLink
+
+    override = get_resource_override(name)
+    if override is not None:
+        if override.startswith(("http://", "https://")):
+            return RemoteLinkCls, override, {"download": False}
+        if override.startswith("data:"):
+            if "," in override:
+                content_b64 = override.split(",", 1)[1]
+                content = base64.b64decode(content_b64).decode("utf-8")
+                return InlineLinkCls, "", {"content": content}
+            return RemoteLinkCls, override, {"download": False}
+        search_paths = []
+        if os.path.isabs(override):
+            search_paths.append(override)
+        else:
+            if local_path:
+                search_paths.append(os.path.join(local_path, override))
+            search_paths.append(override)
+        for path in search_paths:
+            if os.path.exists(path):
+                content = open(path, "r", encoding="utf-8").read()
+                return InlineLinkCls, "", {"content": content}
+        raise FileNotFoundError(
+            f"Resource override for '{name}' not found: {override}. "
+            f"Searched paths: {search_paths}"
+        )
+
+    if resource_mode == ResourceMode.CDN:
+        return RemoteLinkCls, url, {"download": False}
+
+    if resource_mode == ResourceMode.INLINE:
+        return InlineLinkCls, url, {"download": True}
+
+    if resource_mode == ResourceMode.LOCAL:
+        filename = _url_to_filename(url)
+        search_paths = []
+        if local_path:
+            search_paths.append(os.path.join(local_path, filename))
+        for path in search_paths:
+            if os.path.exists(path):
+                content = open(path, "r", encoding="utf-8").read()
+                return InlineLinkCls, "", {"content": content}
+        raise FileNotFoundError(
+            f"Cannot find local resource '{name}': {filename}. "
+            f"Searched in: {local_path or '(no local_path set)'}. "
+            f"Use set_resource_override('{name}', 'path/to/file') to specify the exact path."
+        )
+
+    return RemoteLinkCls, url, {"download": False}
+
+
 class JSCSSMixin(MacroElement):
-    """Render links to external Javascript and CSS resources."""
+    """Render links to external Javascript and CSS resources.
+
+    Supports three resource loading modes (see :class:`ResourceMode`):
+    - ``"cdn"``: Load from CDN URLs (default, backwards compatible)
+    - ``"inline"``: Download resources and inline them directly into HTML
+    - ``"local"``: Use locally cached resource files from ``local_path``
+
+    The resource mode can be set globally via :func:`folium.set_resource_mode`
+    or per-instance via the ``resource_mode`` parameter.
+    """
 
     default_js: list[tuple[str, str]] = []
     default_css: list[tuple[str, str]] = []
+
+    def __init__(
+        self,
+        *args,
+        resource_mode: Optional[str] = None,
+        local_path: Optional[str] = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.resource_mode = resource_mode
+        self.local_path = local_path
+
+    def _get_effective_resource_mode(self) -> tuple[str, Optional[str]]:
+        mode = self.resource_mode or get_resource_mode()
+        local = self.local_path or get_local_path()
+        return mode, local
 
     # Since this is typically used as a mixin, we cannot
     # override the _template member variable here. It would
@@ -201,11 +196,21 @@ class JSCSSMixin(MacroElement):
             figure, Figure
         ), "You cannot render this Element if it is not in a Figure."
 
+        resource_mode, local_path = self._get_effective_resource_mode()
+
         for name, url in self.default_js:
-            figure.header.add_child(JavascriptLink(url), name=name)
+            link_cls, resolved_url, link_kwargs = _resolve_resource(
+                name, url, resource_mode, "js", local_path
+            )
+            js_link = link_cls(resolved_url, **link_kwargs)
+            figure.header.add_child(js_link, name=name)
 
         for name, url in self.default_css:
-            figure.header.add_child(CssLink(url), name=name)
+            link_cls, resolved_url, link_kwargs = _resolve_resource(
+                name, url, resource_mode, "css", local_path
+            )
+            css_link = link_cls(resolved_url, **link_kwargs)
+            figure.header.add_child(css_link, name=name)
 
         super().render(**kwargs)
 
@@ -353,571 +358,3 @@ class MethodCall(MacroElement):
         self.method = camelize(method)
         self.args = args
         self.kwargs = kwargs
-
-
-_CAPTION_CSS = """\
-<style>
-    .leaflet-control-caption {
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 4px;
-        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
-        padding: 8px 12px;
-        font-size: 12px;
-        line-height: 1.5;
-        color: #333;
-        max-width: 300px;
-    }
-    .leaflet-control-caption .caption-section {
-        padding-bottom: 8px;
-        margin-bottom: 8px;
-        border-bottom: 1px solid #eee;
-    }
-    .leaflet-control-caption .caption-section:last-child {
-        padding-bottom: 0;
-        margin-bottom: 0;
-        border-bottom: none;
-    }
-    .leaflet-control-caption .caption-title {
-        font-weight: bold;
-        font-size: 13px;
-        margin-bottom: 4px;
-        color: #222;
-    }
-    .leaflet-control-caption .caption-header {
-        margin-bottom: 4px;
-    }
-    .leaflet-control-caption .caption-toggle {
-        float: right;
-        cursor: pointer;
-        font-weight: bold;
-        color: #666;
-        margin-left: 8px;
-        user-select: none;
-    }
-    .leaflet-control-caption .caption-body {
-        margin-top: 4px;
-    }
-    .leaflet-control-caption .caption-row {
-        margin: 2px 0;
-    }
-    .leaflet-control-caption .caption-label {
-        color: #666;
-        margin-right: 4px;
-    }
-    .leaflet-control-caption .caption-source a {
-        color: #0078a8;
-        text-decoration: none;
-    }
-    .leaflet-control-caption .caption-source a:hover {
-        text-decoration: underline;
-    }
-    .leaflet-control-caption .caption-legend {
-        margin-top: 6px;
-    }
-    .leaflet-control-caption .caption-legend-item {
-        display: flex;
-        align-items: center;
-        margin: 2px 0;
-    }
-    .leaflet-control-caption .caption-legend-color {
-        display: inline-block;
-        width: 20px;
-        height: 14px;
-        margin-right: 6px;
-        border: 1px solid #ccc;
-        border-radius: 2px;
-    }
-    .leaflet-control-caption .caption-copyright {
-        margin-top: 6px;
-        color: #888;
-        font-size: 11px;
-        font-style: italic;
-    }
-    .leaflet-control-caption.caption-collapsed .caption-body,
-    .leaflet-control-caption.caption-collapsed .caption-section {
-        display: none;
-    }
-    .leaflet-control-caption .caption-empty {
-        color: #999;
-        font-style: italic;
-    }
-</style>"""
-
-_CAPTION_JS_TEMPLATE = """\
-(function() {{
-    var CaptionControl = L.Control.extend({{
-        options: {{
-            position: {position_js},
-            collapsible: {collapsible_js},
-            collapsed: {collapsed_js}
-        }},
-
-        initialize: function(options) {{
-            L.setOptions(this, options);
-            this._registryId = options.registryId;
-            this._visibleLayers = [];
-        }},
-
-        onAdd: function(map) {{
-            this._container = L.DomUtil.create('div', 'leaflet-control-caption');
-            this._buildContent();
-            L.DomEvent.disableClickPropagation(this._container);
-            L.DomEvent.disableScrollPropagation(this._container);
-            return this._container;
-        }},
-
-        _safeUrl: function(url) {{
-            if (!url || typeof url !== 'string') return null;
-            try {{
-                var parsed = new URL(url, window.location.href);
-                var allowed = ['http:', 'https:', 'ftp:', 'ftps:', 'mailto:'];
-                if (allowed.indexOf(parsed.protocol) === -1) return null;
-                return parsed.href;
-            }} catch (e) {{
-                return null;
-            }}
-        }},
-
-        _safeColor: function(color) {{
-            if (!color || typeof color !== 'string') return null;
-            if (color.length > 200) return null;
-            if (/[\\x00-\\x1f<>]/.test(color)) return null;
-            var test = document.createElement('div');
-            test.style.backgroundColor = '';
-            test.style.backgroundColor = color;
-            if (test.style.backgroundColor === '') return null;
-            return test.style.backgroundColor;
-        }},
-
-        _appendText: function(parent, className, text) {{
-            if (!text) return;
-            var el = document.createElement('div');
-            if (className) el.className = className;
-            el.textContent = text;
-            parent.appendChild(el);
-        }},
-
-        _appendRow: function(parent, label, value, rowClass) {{
-            if (!value) return;
-            var row = document.createElement('div');
-            row.className = rowClass || 'caption-row';
-            if (label) {{
-                var labelSpan = document.createElement('span');
-                labelSpan.className = 'caption-label';
-                labelSpan.textContent = label;
-                row.appendChild(labelSpan);
-            }}
-            var valueSpan = document.createElement('span');
-            valueSpan.className = 'caption-value';
-            valueSpan.textContent = value;
-            row.appendChild(valueSpan);
-            parent.appendChild(row);
-        }},
-
-        _renderMetadata: function(meta, container) {{
-            if (!meta) return;
-
-            this._appendText(container, 'caption-title', meta.title);
-            this._appendText(container, 'caption-row caption-description', meta.description);
-
-            var hasMetaRow = meta.unit || meta.resolution || meta.updated_time;
-            if (hasMetaRow) {{
-                var metaRow = document.createElement('div');
-                metaRow.className = 'caption-row';
-                var parts = [];
-                if (meta.unit) parts.push('Unit: ' + meta.unit);
-                if (meta.resolution) parts.push('Resolution: ' + meta.resolution);
-                if (meta.updated_time) parts.push('Updated: ' + meta.updated_time);
-                metaRow.textContent = parts.join(' | ');
-                container.appendChild(metaRow);
-            }}
-
-            var safeUrl = this._safeUrl(meta.source_url);
-            if (safeUrl) {{
-                var sourceRow = document.createElement('div');
-                sourceRow.className = 'caption-row caption-source';
-                var label = document.createElement('span');
-                label.className = 'caption-label';
-                label.textContent = 'Source:';
-                sourceRow.appendChild(label);
-                var link = document.createElement('a');
-                link.href = safeUrl;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = meta.source_text || meta.source_url;
-                sourceRow.appendChild(link);
-                container.appendChild(sourceRow);
-            }}
-
-            if (meta.legend && meta.legend.length > 0) {{
-                var legendEl = document.createElement('div');
-                legendEl.className = 'caption-legend';
-                for (var i = 0; i < meta.legend.length; i++) {{
-                    var item = meta.legend[i];
-                    if (!item) continue;
-                    var itemEl = document.createElement('div');
-                    itemEl.className = 'caption-legend-item';
-                    var colorEl = document.createElement('span');
-                    colorEl.className = 'caption-legend-color';
-                    var safeColor = this._safeColor(item.color);
-                    if (safeColor) {{
-                        colorEl.style.backgroundColor = safeColor;
-                    }} else {{
-                        colorEl.style.backgroundColor = '#cccccc';
-                    }}
-                    itemEl.appendChild(colorEl);
-                    var labelEl = document.createElement('span');
-                    labelEl.className = 'caption-legend-label';
-                    labelEl.textContent = item.label || '';
-                    itemEl.appendChild(labelEl);
-                    legendEl.appendChild(itemEl);
-                }}
-                container.appendChild(legendEl);
-            }}
-
-            this._appendText(container, 'caption-copyright', meta.copyright);
-        }},
-
-        _buildContent: function() {{
-            var container = this._container;
-            while (container.firstChild) {{
-                container.removeChild(container.firstChild);
-            }}
-
-            if (this.options.collapsible) {{
-                var toggle = document.createElement('span');
-                toggle.className = 'caption-toggle';
-                toggle.title = 'Toggle';
-                toggle.textContent = this.options.collapsed ? '+' : '−';
-                container.appendChild(toggle);
-                var self = this;
-                L.DomEvent.on(toggle, 'click', function(e) {{
-                    L.DomEvent.stopPropagation(e);
-                    self._toggle();
-                }});
-            }}
-
-            var body = document.createElement('div');
-            body.className = 'caption-body';
-
-            if (this._visibleLayers.length === 0) {{
-                var empty = document.createElement('div');
-                empty.className = 'caption-empty';
-                empty.textContent = 'No active layer metadata';
-                body.appendChild(empty);
-            }} else {{
-                for (var i = 0; i < this._visibleLayers.length; i++) {{
-                    var layerMeta = this._visibleLayers[i];
-                    var section = document.createElement('div');
-                    section.className = 'caption-section';
-                    if (i === this._visibleLayers.length - 1) {{
-                        section.className += ' last';
-                    }}
-                    this._renderMetadata(layerMeta, section);
-                    body.appendChild(section);
-                }}
-            }}
-
-            container.appendChild(body);
-
-            if (this.options.collapsed) {{
-                L.DomUtil.addClass(container, 'caption-collapsed');
-            }}
-        }},
-
-        _toggle: function() {{
-            var collapsed = L.DomUtil.hasClass(
-                this._container, 'caption-collapsed');
-            var toggle = this._container.querySelector('.caption-toggle');
-            if (collapsed) {{
-                L.DomUtil.removeClass(this._container, 'caption-collapsed');
-                if (toggle) toggle.textContent = '−';
-            }} else {{
-                L.DomUtil.addClass(this._container, 'caption-collapsed');
-                if (toggle) toggle.textContent = '+';
-            }}
-        }},
-
-        setVisibleLayers: function(layerMetas) {{
-            this._visibleLayers = layerMetas;
-            if (this._container) {{
-                this._buildContent();
-            }}
-            this._container.style.display =
-                (layerMetas.length > 0) ? '' : 'none';
-        }}
-    }});
-
-    L.control.caption = function(options) {{
-        return new CaptionControl(options);
-    }};
-
-    window.__captionRegistry_{registry_id} = {{
-        control: null,
-        layers: {{}},
-        visibleOrder: [],
-
-        register: function(layerId, layerVar, metadata) {{
-            this.layers[layerId] = {{
-                layerVar: layerVar,
-                metadata: metadata,
-                visible: false
-            }};
-            var self = this;
-
-            if (layerVar && layerVar.on) {{
-                layerVar.on('add', function() {{
-                    self.layers[layerId].visible = true;
-                    var idx = self.visibleOrder.indexOf(layerId);
-                    if (idx === -1) {{
-                        self.visibleOrder.push(layerId);
-                    }}
-                    self._update();
-                }});
-                layerVar.on('remove', function() {{
-                    self.layers[layerId].visible = false;
-                    var idx = self.visibleOrder.indexOf(layerId);
-                    if (idx !== -1) {{
-                        self.visibleOrder.splice(idx, 1);
-                    }}
-                    self._update();
-                }});
-            }}
-        }},
-
-        setInitialVisible: function(layerId, visible) {{
-            if (this.layers[layerId]) {{
-                this.layers[layerId].visible = visible;
-                if (visible) {{
-                    var idx = this.visibleOrder.indexOf(layerId);
-                    if (idx === -1) {{
-                        this.visibleOrder.push(layerId);
-                    }}
-                }}
-            }}
-        }},
-
-        _update: function() {{
-            if (!this.control) return;
-            var visibleMetas = [];
-            for (var i = 0; i < this.visibleOrder.length; i++) {{
-                var layerId = this.visibleOrder[i];
-                if (this.layers[layerId] && this.layers[layerId].visible) {{
-                    visibleMetas.push(this.layers[layerId].metadata);
-                }}
-            }}
-            this.control.setVisibleLayers(visibleMetas);
-        }},
-
-        initControl: function(control) {{
-            this.control = control;
-            this._update();
-        }}
-    }};
-
-    var {ctrl_var} = L.control.caption({{
-        position: {position_js},
-        collapsible: {collapsible_js},
-        collapsed: {collapsed_js},
-        registryId: {registry_id_js}
-    }});
-    {ctrl_var}.addTo({map_var});
-    window.__captionRegistry_{registry_id}.initControl({ctrl_var});
-}})();
-"""
-
-
-class CaptionRegistry:
-    """
-    Internal implementation — Map-level metadata registry.
-
-    .. warning::
-        This is a private implementation detail and **not part of the
-        public API**.  Users should only interact with captions via the
-        ``caption`` parameter on raster layer classes (see
-        :class:`LayerMetadata`).  The class name, constructor signature
-        and all attributes may change at any time without notice.
-
-    This is a pure-Python manager (not part of the branca render tree)
-    that collects metadata from every caption-enabled layer on a Map
-    and injects a single unified Leaflet control into the document's
-    ``<head>`` / ``<script>`` sections.  By writing to the Figure's
-    ``header`` and ``script`` Elements directly (rather than as
-    children of the Map) it avoids timing issues that would otherwise
-    cause ``add_child()`` registrations to be missed during render.
-    """
-
-    def __init__(
-        self,
-        position: str = "bottomright",
-        collapsible: bool = True,
-        collapsed: bool = False,
-    ):
-        self._position = position
-        self._collapsible = collapsible
-        self._collapsed = collapsed
-        self._layers: dict[str, dict] = {}
-        self._control_added = False
-        self._map_obj = None
-        self._registry_id = None
-        self._ctrl_var = None
-
-    def _ensure_control(self, map_obj):
-        if self._control_added:
-            return
-        self._map_obj = map_obj
-        self._registry_id = id(self)
-        self._ctrl_var = f"caption_control_{self._registry_id}"
-
-        figure = map_obj.get_root()
-        figure.header.add_child(
-            Element(_CAPTION_CSS), name="caption_styles",
-        )
-
-        control_js = _CAPTION_JS_TEMPLATE.format(
-            registry_id=self._registry_id,
-            registry_id_js=json.dumps(self._registry_id),
-            ctrl_var=self._ctrl_var,
-            map_var=map_obj.get_name(),
-            position_js=json.dumps(self._position),
-            collapsible_js=json.dumps(self._collapsible),
-            collapsed_js=json.dumps(self._collapsed),
-        )
-        figure.script.add_child(
-            Element(control_js), name="caption_control",
-        )
-
-        self._control_added = True
-
-    def register_layer(
-        self,
-        layer_id: str,
-        layer_var_name: str,
-        metadata: Union[LayerMetadata, dict, None],
-        initially_visible: bool = True,
-        map_obj=None,
-    ):
-        if metadata is None:
-            return
-
-        normalized = normalize_layer_metadata(metadata)
-        if normalized is None:
-            return
-
-        if map_obj is not None:
-            self._ensure_control(map_obj)
-
-        self._layers[layer_id] = {
-            "layer_var_name": layer_var_name,
-            "metadata": normalized,
-            "visible": initially_visible,
-        }
-
-        if not self._control_added:
-            return
-
-        register_js = (
-            f"(function() {{"
-            f"var registry = window.__captionRegistry_{self._registry_id};"
-            f"if (registry) {{"
-            f"var layerVar = {layer_var_name};"
-            f"registry.register({json.dumps(layer_id)}, layerVar, {json.dumps(normalized)});"
-            f"registry.setInitialVisible({json.dumps(layer_id)}, {json.dumps(initially_visible)});"
-            f"}}"
-            f"}})();"
-        )
-        self._map_obj.get_root().script.add_child(
-            Element(register_js), name=f"caption_reg_{layer_id}",
-        )
-
-
-class CaptionMixin:
-    """
-    Internal implementation — Mixin that wires up the Map-level
-    CaptionRegistry for raster layer classes.
-
-    .. warning::
-        This is a private implementation detail and **not part of the
-        public API**.  Users should never subclass or directly
-        instantiate this mixin; they pass :class:`LayerMetadata`-style
-        dicts through each layer's ``caption`` argument instead.
-
-    A layer opts in simply by::
-
-        class MyLayer(CaptionMixin, Layer):
-            def __init__(self, caption=None, show=True, ...):
-                ...
-                self._init_caption(caption, show=show)
-
-    Registration is triggered through two explicit, safe paths:
-
-    * ``add_to(parent)`` — immediately after the layer's ``_parent``
-      pointer is populated by ``super().add_to()``.
-    * ``render()`` — a fallback path so users who call
-      ``map.add_child(layer)`` instead of ``layer.add_to(map)`` still
-      get their caption registered in time.
-
-    Both paths eventually funnel through :meth:`_try_register`, which
-    walks the parent chain to find the :class:`folium.Map`, lazily
-    creates the :class:`CaptionRegistry` on it, and hands over the
-    normalized metadata.
-    """
-
-    def _init_caption(
-        self,
-        caption: Optional[Union[LayerMetadata, dict]],
-        show: bool = True,
-    ):
-        self._caption_meta = caption
-        self._caption_show = show
-        self._caption_registered = False
-
-    def add_to(self, parent, name=None):
-        result = super().add_to(parent, name=name)
-        self._try_register()
-        return result
-
-    def render(self, **kwargs):
-        self._try_register()
-        super().render(**kwargs)
-
-    def _try_register(self):
-        if self._caption_meta is None or self._caption_registered:
-            return
-        if not hasattr(self, "_parent") or self._parent is None:
-            return
-
-        map_obj = self._find_map()
-        if map_obj is None:
-            return
-
-        registry = self._get_or_create_registry(map_obj)
-        registry.register_layer(
-            layer_id=self.get_name(),
-            layer_var_name=self.get_name(),
-            metadata=self._caption_meta,
-            initially_visible=self._caption_show,
-            map_obj=map_obj,
-        )
-        self._caption_registered = True
-
-    def _find_map(self):
-        from folium.folium import Map
-        from folium.map import FeatureGroup, Layer
-
-        current = self._parent
-        while current is not None:
-            if isinstance(current, Map):
-                return current
-            if isinstance(current, (FeatureGroup, Layer)):
-                current = getattr(current, "_parent", None)
-            else:
-                current = None
-        return None
-
-    def _get_or_create_registry(self, map_obj) -> CaptionRegistry:
-        registry = getattr(map_obj, "_caption_registry", None)
-        if registry is None:
-            registry = CaptionRegistry()
-            map_obj._caption_registry = registry
-        return registry

@@ -18,10 +18,6 @@ Raster Layers
 
 .. automodule:: folium.raster_layers
 
-.. autoclass:: folium.LayerMetadata
-.. autoclass:: folium.LegendItem
-.. autofunction:: folium.normalize_layer_metadata
-
 
 Vector Layers
 --------------------

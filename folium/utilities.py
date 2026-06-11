@@ -455,3 +455,52 @@ def parse_font_size(value: Union[str, int, float]) -> str:
     if (value[-3:] != "rem") and (value[-2:] not in ["em", "px"]):
         raise ValueError("The font size must be expressed in rem, em, or px.")
     return value
+
+
+class ResourceMode:
+    CDN = "cdn"
+    INLINE = "inline"
+    LOCAL = "local"
+
+
+_VALID_RESOURCE_MODES = {ResourceMode.CDN, ResourceMode.INLINE, ResourceMode.LOCAL}
+
+_global_resource_mode: str = ResourceMode.CDN
+_global_local_path: Optional[str] = None
+_global_resource_overrides: dict[str, str] = {}
+
+
+def get_resource_mode() -> str:
+    return _global_resource_mode
+
+
+def set_resource_mode(
+    mode: str, local_path: Optional[str] = None) -> None:
+    global _global_resource_mode, _global_local_path
+    if mode not in _VALID_RESOURCE_MODES:
+        raise ValueError(
+            f"Invalid resource_mode '{mode}'. "
+            f"Must be one of: {_VALID_RESOURCE_MODES}"
+        )
+    if mode == ResourceMode.LOCAL and local_path is None:
+        raise ValueError(
+            "resource_mode='local' requires local_path to be specified"
+        )
+    _global_resource_mode = mode
+    _global_local_path = local_path
+
+
+def get_local_path() -> Optional[str]:
+    return _global_local_path
+
+
+def set_resource_override(resource_name: str, local_path_or_url: str) -> None:
+    _global_resource_overrides[resource_name] = local_path_or_url
+
+
+def get_resource_override(resource_name: str) -> Optional[str]:
+    return _global_resource_overrides.get(resource_name)
+
+
+def clear_resource_overrides() -> None:
+    _global_resource_overrides.clear()
