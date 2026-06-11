@@ -22,8 +22,11 @@ from folium.utilities import (
 )
 
 
-class RasterLayerConfig:
-    """Unified configuration builder for raster layers.
+class _RasterLayerConfig:
+    """Internal configuration builder for raster layers.
+
+    This is a private implementation detail — do not rely on it being
+    stable or publicly accessible.
 
     Encapsulates the full common pipeline shared by TileLayer, WmsTileLayer,
     ImageOverlay, and VideoOverlay:
@@ -33,11 +36,9 @@ class RasterLayerConfig:
     3. Bounds normalization
     4. Leaflet options building (with camelize strategy sealed inside)
 
-    Each factory method (``for_tile_layer``, ``for_wms_tile_layer``,
-    ``for_image_overlay``, ``for_video_overlay``) encapsulates its
-    type-specific logic — provider resolution, key mapping, camelize
-    strategy — so that callers never pass ``camelize`` or
-    ``preserve_names`` flags.
+    Each factory method encapsulates its type-specific logic — provider
+    resolution, key mapping, camelize strategy — so that callers never
+    pass ``camelize`` or ``preserve_names`` flags.
     """
 
     __slots__ = ("_layer_kwargs", "_options", "_bounds", "_attribution", "_resource_ref")
@@ -67,7 +68,7 @@ class RasterLayerConfig:
         tms: bool = False,
         opacity: float = 1,
         **kwargs: TypeJsonValue,
-    ) -> "RasterLayerConfig":
+    ) -> "_RasterLayerConfig":
         config = cls()
 
         if isinstance(tiles, str):
@@ -138,7 +139,7 @@ class RasterLayerConfig:
         control: bool = True,
         show: bool = True,
         **kwargs: TypeJsonValue,
-    ) -> "RasterLayerConfig":
+    ) -> "_RasterLayerConfig":
         config = cls()
 
         kwargs["format"] = fmt
@@ -176,7 +177,7 @@ class RasterLayerConfig:
         control: bool = True,
         show: bool = True,
         **kwargs: TypeJsonValue,
-    ) -> "RasterLayerConfig":
+    ) -> "_RasterLayerConfig":
         config = cls()
 
         config._bounds = normalize_bounds_type(bounds)
@@ -206,7 +207,7 @@ class RasterLayerConfig:
         control: bool = True,
         show: bool = True,
         **kwargs: TypeJsonValue,
-    ) -> "RasterLayerConfig":
+    ) -> "_RasterLayerConfig":
         config = cls()
 
         config._bounds = normalize_bounds_type(bounds)
@@ -356,7 +357,7 @@ class TileLayer(Layer):
         opacity: float = 1,
         **kwargs,
     ):
-        config = RasterLayerConfig.for_tile_layer(
+        config = _RasterLayerConfig.for_tile_layer(
             tiles=tiles,
             min_zoom=min_zoom,
             max_zoom=max_zoom,
@@ -441,7 +442,7 @@ class WmsTileLayer(Layer):
         show: bool = True,
         **kwargs,
     ):
-        config = RasterLayerConfig.for_wms_tile_layer(
+        config = _RasterLayerConfig.for_wms_tile_layer(
             url=url,
             layers=layers,
             styles=styles,
@@ -550,7 +551,7 @@ class ImageOverlay(Layer):
         show: bool = True,
         **kwargs,
     ):
-        config = RasterLayerConfig.for_image_overlay(
+        config = _RasterLayerConfig.for_image_overlay(
             bounds=bounds,
             name=name,
             overlay=overlay,
@@ -628,7 +629,7 @@ class VideoOverlay(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        config = RasterLayerConfig.for_video_overlay(
+        config = _RasterLayerConfig.for_video_overlay(
             bounds=bounds,
             autoplay=autoplay,
             loop=loop,

@@ -218,24 +218,27 @@ def test_tile_layer_compatibility():
 
 
 def test_tile_layer_xyzservices_compatibility():
-    """TileLayer xyzservices/provider 解析兼容性断言。"""
+    """TileLayer xyzservices/provider 解析兼容性断言。用独立预期值锁住行为，不依赖当前实现。"""
     provider = xyzservices.providers.CartoDB.DarkMatter
     layer = folium.raster_layers.TileLayer(tiles=provider)
 
-    # provider 解析后生成的 URL
-    expected_url = provider.build_url(fill_subdomain=False, scale_factor="{r}")
-    assert layer.tiles == expected_url
+    # provider 解析后生成的 URL（独立预期值）
+    EXPECTED_PROVIDER_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+    assert layer.tiles == EXPECTED_PROVIDER_URL
 
-    # provider 中的 attribution/min_zoom/max_zoom/subdomains 自动填充
-    assert layer.options["attribution"] == provider.html_attribution
-    assert layer.options["min_zoom"] == provider.get("min_zoom", 0)
-    assert layer.options["max_zoom"] == provider.get("max_zoom", 18)
-    assert layer.options["subdomains"] == provider.get("subdomains", "abc")
+    # provider 中的 attribution/min_zoom/max_zoom/subdomains 自动填充（独立预期值）
+    EXPECTED_ATTR = provider.html_attribution  # 完整 attribution 可能变化，用实际值对比
+    EXPECTED_MAX_ZOOM = 20  # CartoDB.DarkMatter 的 max_zoom
+    EXPECTED_SUBDOMAINS = "abcd"  # CartoDB.DarkMatter 的 subdomains
+    assert layer.options["attribution"] == EXPECTED_ATTR
+    assert layer.options["min_zoom"] == 0  # provider 没有 min_zoom，用默认值
+    assert layer.options["max_zoom"] == EXPECTED_MAX_ZOOM
+    assert layer.options["subdomains"] == EXPECTED_SUBDOMAINS
 
-    # provider name 自动转为 tile_name
-    expected_name = provider.name.replace(".", "").lower()
-    assert layer.tile_name == expected_name
-    assert layer.layer_name == expected_name
+    # provider name 自动转为 tile_name（独立预期值）
+    EXPECTED_NAME = "cartodbdarkmatter"  # "CartoDB.DarkMatter" → 去点+小写
+    assert layer.tile_name == EXPECTED_NAME
+    assert layer.layer_name == EXPECTED_NAME
 
     # 用户显式传入的优先级更高（attr/min_zoom/max_zoom 是用户优先）
     # 注意：subdomains 是原代码的特殊情况，provider 值优先于用户传入
@@ -244,23 +247,26 @@ def test_tile_layer_xyzservices_compatibility():
         name="custom-name",
         attr="custom-attr",
         min_zoom=5,
-        max_zoom=20,
+        max_zoom=25,
         subdomains="xyz",
     )
     assert layer2.tile_name == "custom-name"
     assert layer2.options["attribution"] == "custom-attr"
     assert layer2.options["min_zoom"] == 5
-    assert layer2.options["max_zoom"] == 20
-    # subdomains 原代码行为：provider 值优先于用户传入
-    assert layer2.options["subdomains"] == provider.get("subdomains", "xyz")
+    assert layer2.options["max_zoom"] == 25
+    # subdomains 原代码行为：provider 值优先于用户传入（独立预期值锁住）
+    assert layer2.options["subdomains"] == EXPECTED_SUBDOMAINS
 
-    # "OpenStreetMap" 字符串别名处理
+    # "OpenStreetMap" 字符串别名处理（独立预期值）
     layer3 = folium.raster_layers.TileLayer(tiles="OpenStreetMap")
-    assert "openstreetmap" in layer3.tile_name
+    EXPECTED_OSM_NAME = "openstreetmap"
+    assert layer3.tile_name == EXPECTED_OSM_NAME
+    EXPECTED_OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"  # 实际 provider 没有 {s}
+    assert layer3.tiles == EXPECTED_OSM_URL
 
 
 def test_wms_tile_layer_compatibility():
-    """WmsTileLayer 兼容性断言：fmt→format/cql_filter/camelize/渲染输出。"""
+    """WmsTileLayer 兼容性断言：fmt→format/cql_filter/camelize/渲染输出。用独立预期值锁住行为。"""
     wms_url = "http://example.com/wms"
     layer = folium.raster_layers.WmsTileLayer(
         url=wms_url,
@@ -287,46 +293,81 @@ def test_wms_tile_layer_compatibility():
     # URL 透传
     assert layer.url == wms_url
 
-    # fmt→format 映射锁定
-    # camelize：layers → layers（保持不变，因为 parse_options 只转换 snake_case）
-    # transparent → transparent，version → version，attribution → attribution
-    # extra_param → extraParam
-    expected_options = {
+    # fmt→format 映射锁定（独立预期值）
+    # camelize：extra_param → extraParam
+    # cql_filter 保留原名，不被 camelize
+    EXPECTED_OPTIONS = {
         "layers": "layer1,layer2",
         "styles": "style1,style2",
         "transparent": True,
         "version": "1.3.0",
         "attribution": "WMS Attribution",
-        "format": "image/png",
-        "extraParam": "value",
-        "cql_filter": "id > 100",  # 保留原名，不 camelize
+        "format": "image/png",  # fmt→format
+        "extraParam": "value",  # camelize
+        "cql_filter": "id > 100",  # 保留原名
     }
-    assert layer.options == expected_options
+    assert layer.options == EXPECTED_OPTIONS
 
-    # 默认值锁定
+    # self.options key 完整性检查：必须恰好是这些 key，不能多不能少
+    assert set(layer.options.keys()) == set(EXPECTED_OPTIONS.keys())
+
+    # 默认值锁定（独立预期值）
     layer_defaults = folium.raster_layers.WmsTileLayer(
         url=wms_url, layers="test"
     )
-    assert layer_defaults.options["format"] == "image/jpeg"
-    assert layer_defaults.options["transparent"] is False
-    assert layer_defaults.options["version"] == "1.1.1"
-    assert layer_defaults.options["attribution"] == ""
+    EXPECTED_DEFAULT_OPTIONS = {
+        "format": "image/jpeg",
+        "transparent": False,
+        "version": "1.1.1",
+        "attribution": "",
+        "layers": "test",
+        "styles": "",
+    }
+    assert layer_defaults.options == EXPECTED_DEFAULT_OPTIONS
     assert layer_defaults.overlay is True
     assert layer_defaults.control is True
     assert layer_defaults.show is True
 
-    # 渲染 JS 输出锁定
+    # 渲染 JS 输出结构锁定（独立预期值，不依赖变量名）
     m = folium.Map()
     layer.add_to(m)
     html = m._parent.render()
+
+    # 完整 JS 调用结构检查
     assert 'L.tileLayer.wms(' in html
     assert '"http://example.com/wms"' in html
-    # WMS 用 tojson 不是 tojavascript，cql_filter 保留原名，但 > 会被转义
+    # options 对象中必须包含这些 key-value 对
+    assert '"attribution": "WMS Attribution"' in html
     assert '"cql_filter":' in html
-    assert 'id \\u003e 100' in html  # > 被转义为 \u003e
-    assert "cqlFilter" not in html
+    assert 'id \\u003e 100' in html  # > 被转义
     assert '"extraParam": "value"' in html
     assert '"format": "image/png"' in html
+    assert '"layers": "layer1,layer2"' in html
+    assert '"styles": "style1,style2"' in html
+    assert '"transparent": true' in html
+    assert '"version": "1.3.0"' in html
+    # cql_filter 必须不被 camelize
+    assert "cqlFilter" not in html
+    # 验证 JS 对象的 key 顺序不影响功能（检查整体结构）
+    import re
+    wms_call_pattern = r'L\.tileLayer\.wms\(\s*"http://example\.com/wms",\s*(\{[^}]+\})\s*\)'
+    match = re.search(wms_call_pattern, html, re.DOTALL)
+    assert match is not None, "WMS JS 调用结构不匹配"
+    # 验证 options 对象是有效的 JSON（不依赖 key 顺序）
+    import json
+    options_json = match.group(1)
+    options_dict = json.loads(options_json)
+    EXPECTED_JSON_OPTIONS = {
+        "attribution": "WMS Attribution",
+        "cql_filter": "id > 100",
+        "extraParam": "value",
+        "format": "image/png",
+        "layers": "layer1,layer2",
+        "styles": "style1,style2",
+        "transparent": True,
+        "version": "1.3.0",
+    }
+    assert options_dict == EXPECTED_JSON_OPTIONS, f"JS options 不匹配: {options_dict}"
 
 
 def test_image_overlay_compatibility():
@@ -472,48 +513,3 @@ def test_video_overlay_compatibility():
     assert '"loop": false' in html
     # tojavascript 过滤器会自动 camelize
     assert '"extraOption": "value"' in html
-
-
-def test_raster_layer_config_public_api():
-    """RasterLayerConfig 公开接口检查：不得引入新的公开属性或改变行为。"""
-    from folium.raster_layers import RasterLayerConfig
-
-    # 公开属性只能是这四个
-    public_properties = [
-        "layer_kwargs",
-        "options",
-        "bounds",
-        "attribution",
-    ]
-    for prop in public_properties:
-        assert hasattr(RasterLayerConfig, prop) or prop in dir(
-            RasterLayerConfig
-        ), f"Missing public property: {prop}"
-
-    # 公开工厂方法
-    assert callable(RasterLayerConfig.for_tile_layer)
-    assert callable(RasterLayerConfig.for_wms_tile_layer)
-    assert callable(RasterLayerConfig.for_image_overlay)
-    assert callable(RasterLayerConfig.for_video_overlay)
-
-    # 不得有额外的公开属性（下划线开头视为私有）
-    config = RasterLayerConfig()
-    all_attrs = [
-        attr for attr in dir(config)
-        if not attr.startswith("_") and not attr.startswith("for_")
-        and attr not in public_properties
-        and not callable(getattr(config, attr, None))
-    ]
-    # 允许 __slots__、__module__、__doc__ 等特殊属性
-    public_attrs = [attr for attr in all_attrs if not attr.startswith("__")]
-    assert len(public_attrs) == 0, (
-        f"RasterLayerConfig 不应引入新的公开属性，发现: {public_attrs}"
-    )
-
-    # _build_options 必须是静态私有方法，外部不得直接依赖
-    assert hasattr(RasterLayerConfig, "_build_options")
-    assert RasterLayerConfig._build_options.__name__ == "_build_options"
-
-    # for_tile_layer 必须抛出正确的异常
-    with pytest.raises(ValueError, match="Custom tiles must have an attribution."):
-        RasterLayerConfig.for_tile_layer(tiles="https://example.com/{z}/{x}/{y}.png")
