@@ -1,8 +1,8 @@
-from typing import Optional
+from typing import Optional, Union
 
 from branca.element import MacroElement
 
-from folium.elements import CaptionMixin
+from folium.elements import CaptionMixin, LayerMetadata
 from folium.template import Template
 
 
@@ -18,9 +18,10 @@ class FloatImage(CaptionMixin, MacroElement):
         Vertical position from the bottom, as a percentage of screen height.
     left: int, default 75
         Horizontal position from the left, as a percentage of screen width.
-    caption: dict, optional
+    caption: dict or LayerMetadata, optional
         Metadata and legend caption for the float image.
         See folium.raster_layers.ImageOverlay for the full list of supported keys.
+        Parameter accepts both LayerMetadata TypedDict or plain dict.
     **kwargs
         Additional keyword arguments are applied as CSS properties.
         For example: `width='300px'`.
@@ -54,7 +55,7 @@ class FloatImage(CaptionMixin, MacroElement):
         image,
         bottom=75,
         left=75,
-        caption: Optional[dict] = None,
+        caption: Optional[Union[LayerMetadata, dict]] = None,
         **kwargs,
     ):
         super().__init__()

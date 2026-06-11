@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, Union
 
 import xyzservices
 
-from folium.elements import CaptionMixin
+from folium.elements import CaptionMixin, LayerMetadata
 from folium.map import Layer
 from folium.template import Template
 from folium.utilities import (
@@ -78,6 +78,7 @@ class TileLayer(CaptionMixin, Layer):
     caption: dict, optional
         Metadata and legend caption for the tile layer.
         See ImageOverlay for the full list of supported keys.
+        Parameter accepts both LayerMetadata TypedDict or plain dict.
     **kwargs : additional keyword arguments
         Other keyword arguments are passed as options to the Leaflet tileLayer
         object.
@@ -109,7 +110,7 @@ class TileLayer(CaptionMixin, Layer):
         subdomains: str = "abc",
         tms: bool = False,
         opacity: float = 1,
-        caption: Optional[dict] = None,
+        caption: Optional[Union[LayerMetadata, dict]] = None,
         **kwargs,
     ):
         if isinstance(tiles, str):
@@ -281,7 +282,7 @@ class ImageOverlay(CaptionMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    caption: dict, optional
+    caption: dict or LayerMetadata, optional
         Metadata and legend caption for the image layer.
         Supports the following keys:
 
@@ -297,6 +298,10 @@ class ImageOverlay(CaptionMixin, Layer):
         - collapsible: bool, whether the panel is collapsible (default True)
         - collapsed: bool, whether initially collapsed (default False)
         - position: str, control position (default 'bottomright')
+
+        Multiple layers' metadata will be merged into a single unified
+        panel managed by the Map-level CaptionRegistry.
+        Parameter accepts both LayerMetadata TypedDict or plain dict.
 
     See https://leafletjs.com/reference.html#imageoverlay for more
     options.
@@ -341,7 +346,7 @@ class ImageOverlay(CaptionMixin, Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
-        caption: Optional[dict] = None,
+        caption: Optional[Union[LayerMetadata, dict]] = None,
         **kwargs,
     ):
         super().__init__(name=name, overlay=overlay, control=control, show=show)
@@ -387,9 +392,10 @@ class VideoOverlay(CaptionMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    caption: dict, optional
+    caption: dict or LayerMetadata, optional
         Metadata and legend caption for the video layer.
         See ImageOverlay for the full list of supported keys.
+        Parameter accepts both LayerMetadata TypedDict or plain dict.
     **kwargs:
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#videooverlay
@@ -416,7 +422,7 @@ class VideoOverlay(CaptionMixin, Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
-        caption: Optional[dict] = None,
+        caption: Optional[Union[LayerMetadata, dict]] = None,
         **kwargs: TypeJsonValue,
     ):
         super().__init__(name=name, overlay=overlay, control=control, show=show)
