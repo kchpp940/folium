@@ -317,17 +317,25 @@ def _serialize_layer(
     raise TypeError(f"Unsupported layer type: {type(layer).__name__}")
 
 
-def _dedupe_entries(entries: list[SearchEntry]) -> list[SearchEntry]:
-    best: dict[str, SearchEntry] = {}
-    for e in entries:
-        existing = best.get(e.stable_id)
-        if existing is None or existing.weight < e.weight:
-            best[e.stable_id] = e
-    return list(best.values())
+def _dedupe_pairs(
+    pairs: list[tuple[SearchEntry, _RegEntry]],
+) -> tuple[list[SearchEntry], list[_RegEntry]]:
+    """Deduplicate (entry, reg) pairs by ``stable_id``, keeping the one
+    with the highest ``weight``.
 
-
-def _dedupe_regs(regs: list[_RegEntry], kept_ids: set[str]) -> list[_RegEntry]:
-    return [r for r in regs if r.stable_id in kept_ids]
+    Stable: if two pairs share the same weight, the first one wins.
+    """
+    best: dict[str, tuple[SearchEntry, _RegEntry]] = {}
+    for entry, reg in pairs:
+        existing_pair = best.get(entry.stable_id)
+        if (
+            existing_pair is None
+            or existing_pair[0].weight < entry.weight
+        ):
+            best[entry.stable_id] = (entry, reg)
+    entries = [p[0] for p in best.values()]
+    regs = [p[1] for p in best.values()]
+    return entries, regs
 
 
 class SearchLayerConfig:
@@ -840,17 +848,13 @@ class Search(JSCSSMixin, MacroElement):
             cfg.validate()
 
         # ---- Build the unified search index entirely in Python. ----
-        raw_entries: list[SearchEntry] = []
-        all_regs: list[_RegEntry] = []
+        raw_pairs: list[tuple[SearchEntry, _RegEntry]] = []
         root_map = getattr(self, "_parent", None)
         for idx, cfg in enumerate(self.layer_configs):
             entries, regs = _serialize_layer(cfg, idx, root_map)
-            raw_entries.extend(entries)
-            all_regs.extend(regs)
+            raw_pairs.extend(zip(entries, regs))
 
-        entries = _dedupe_entries(raw_entries)
-        kept_ids = {e.stable_id for e in entries}
-        regs = _dedupe_regs(all_regs, kept_ids)
+        entries, regs = _dedupe_pairs(raw_pairs)
 
         per_config_tpl: dict[str, Optional[str]] = {
             cfg.layer_var: cfg.label_template for cfg in self.layer_configs
