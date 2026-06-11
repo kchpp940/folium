@@ -68,54 +68,61 @@ class JSCSSMixin(MacroElement):
 
 class EventHandler(MacroElement):
     '''
-    Add javascript event handlers.
+    Add a JavaScript event handler to a layer.
+
+    .. note::
+        As of Folium 0.18+, ``add_child(EventHandler(...))`` on layers that
+        support the :class:`folium.utilities.EventMixin` (Circle, Polygon,
+        Marker, GeoJson, etc.) is automatically absorbed into the unified
+        event system.  This means the EventHandler is no longer rendered as
+        a standalone MacroElement child; instead its event and handler are
+        merged into the layer's internal ``_event_handlers`` dictionary and
+        rendered through the same path as the ``events`` / ``feature_events``
+        / ``layer_events`` constructor parameters.
+
+        If the same event name was already set via a constructor parameter,
+        the ``add_child(EventHandler(...))`` call is ignored and a
+        ``UserWarning`` is emitted to avoid duplicate bindings.
+
+    For layers that do **not** use EventMixin (e.g. ``Map`` itself),
+    ``EventHandler`` still behaves as a classic MacroElement that renders
+    ``{parent_name}.on(event, handler)`` / ``{parent_name}.once(event, handler)``.
+
+    Parameters
+    ----------
+    event : str
+        Name of the Leaflet event to bind (e.g. ``"click"``, ``"mouseover"``).
+    handler : JsCode
+        The JavaScript event handler.  Must be a :class:`folium.JsCode`
+        wrapping a ``function(e) { ... }`` body.
+    once : bool, default False
+        If True, use ``.once()`` so the handler fires only the first time
+        the event occurs.  Otherwise use ``.on()`` (fires every time).
+
+    See Also
+    --------
+    :func:`folium.utilities.EventMixin.set_event`
+        Programmatic alternative for adding a single event.
 
     Examples
     --------
     >>> import folium
     >>> from folium.utilities import JsCode
     >>>
-    >>> m = folium.Map()
-    >>>
-    >>> geo_json_data = {
-    ...     "type": "FeatureCollection",
-    ...     "features": [
-    ...         {
-    ...             "type": "Feature",
-    ...             "geometry": {
-    ...                 "type": "Polygon",
-    ...                 "coordinates": [
-    ...                     [
-    ...                         [100.0, 0.0],
-    ...                         [101.0, 0.0],
-    ...                         [101.0, 1.0],
-    ...                         [100.0, 1.0],
-    ...                         [100.0, 0.0],
-    ...                     ]
-    ...                 ],
-    ...             },
-    ...             "properties": {"prop1": {"title": "Somewhere on Sumatra"}},
-    ...         }
-    ...     ],
-    ... }
-    >>>
-    >>> g = folium.GeoJson(geo_json_data).add_to(m)
-    >>>
-    >>> highlight = JsCode("""
-    ...    function highlight(e) {
-    ...        e.target.original_color = e.layer.options.color;
-    ...        e.target.setStyle({ color: "green" });
-    ...    }
-    ... """)
-    >>>
-    >>> reset = JsCode("""
-    ...    function reset(e) {
-    ...       e.target.setStyle({ color: e.target.original_color });
-    ...    }
-    ... """)
-    >>>
-    >>> g.add_child(EventHandler("mouseover", highlight))
-    >>> g.add_child(EventHandler("mouseout", reset))
+    >>> # Simple layer: EventHandler is absorbed into the layer's event dict.
+    >>> c = folium.Circle(location=[0, 0], radius=100)
+    >>> c.add_child(folium.EventHandler(
+    ...     "click",
+    ...     JsCode("function(e) { console.log('clicked', e.latlng); }"),
+    ... ))
+
+    >>> # GeoJson: absorbed into the layer-level event handlers
+    >>> # (bound to the whole GeoJson layer, not to individual features).
+    >>> g = folium.GeoJson({"type": "Point", "coordinates": [0, 0]})
+    >>> g.add_child(folium.EventHandler(
+    ...     "layeradd",
+    ...     JsCode("function(e) { console.log('layer added'); }"),
+    ... ))
     '''
 
     _template = Template("""

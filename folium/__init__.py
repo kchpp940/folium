@@ -12,6 +12,7 @@ from branca.element import (
     MacroElement,
 )
 
+from folium.elements import EventHandler
 from folium.features import (
     Choropleth,
     ClickForLatLng,
@@ -81,6 +82,7 @@ __all__ = [
     "Div",
     "DivIcon",
     "Element",
+    "EventHandler",
     "EventMixin",
     "FeatureGroup",
     "Figure",

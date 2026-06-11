@@ -36,6 +36,11 @@ Utilities
 
 .. autoclass:: folium.utilities.JsCode
 .. autoclass:: folium.elements.EventHandler
+.. autoclass:: folium.utilities.EventMixin
+   :members:
+.. autodata:: folium.utilities.PREDEFINED_EVENT_ACTIONS
+.. autofunction:: folium.utilities.validate_events
+.. autodata:: folium.utilities.TypeEventHandlers
 
 
 Plugins

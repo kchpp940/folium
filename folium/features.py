@@ -2108,6 +2108,16 @@ class ColorLine(FeatureGroup):
     -------
     A ColorLine object that you can `add_to` a Map.
 
+    Notes
+    -----
+    ColorLine renders each colored segment as a separate ``PolyLine`` child.
+    To bind interaction events (``click``, ``mouseover``, etc.) to the
+    segments, iterate over ``_children`` after construction and set
+    events on each PolyLine, e.g.::
+
+        for child in colorline._children.values():
+            if isinstance(child, folium.PolyLine):
+                child.set_event("click", "alert")
     """
 
     def __init__(

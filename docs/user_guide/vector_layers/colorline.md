@@ -27,4 +27,12 @@ m
 
 ### 事件绑定
 
-`ColorLine` 继承自 `PolyLine`，同样支持通过 `events` 参数绑定交互事件。详见 [事件绑定](../features/event_binding.md) 文档。
+`ColorLine` 将每一段渲染为独立的 `PolyLine` 子对象，因此本身不接受 `events` 参数。要给每一段绑定交互事件，可以在创建后遍历其子元素：
+
+```python
+for child in color_line._children.values():
+    if isinstance(child, folium.PolyLine):
+        child.set_event("click", "alert")
+```
+
+详见 [事件绑定](../features/event_binding.md) 文档。
