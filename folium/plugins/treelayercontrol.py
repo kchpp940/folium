@@ -87,6 +87,16 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         If True and only a skeleton (or None) is given for base/overlay
         trees, automatically populate them from the map's layer children
         using each layer's ``control_group`` attribute.
+    collapsed : bool, default True
+        Whether the entire layer control panel starts collapsed.  If not
+        passed explicitly (left at its default) and any layer declares
+        ``control_collapsed=True``, the panel is forced to start
+        collapsed.  An *explicitly* passed value (True or False) always
+        wins over layer-level hints.  This only controls the panel-level
+        collapse; per-node ``collapsed`` inside ``base_tree`` /
+        ``overlay_tree`` or via layer ``control_collapsed`` controls the
+        tree *branch* folding and follows its own priority rule
+        (explicit tree node > layer hint).
     **kwargs
         Additional (possibly inherited) options. See
         https://leafletjs.com/reference.html#control-layers
@@ -158,6 +168,7 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         expand_all: str = "",
         label_is_selector: str = "both",
         auto_build: bool = True,
+        collapsed=None,
         **kwargs,
     ):
         super().__init__()
@@ -170,6 +181,13 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         kwargs["collapse_all"] = collapse_all
         kwargs["expand_all"] = expand_all
         kwargs["label_is_selector"] = label_is_selector
+        # ``collapsed`` sentinel: None means "default / layer-driven", any
+        # bool is the user's explicit choice and will not be overridden by
+        # layer-level ``control_collapsed`` hints.
+        self._collapsed_explicit = collapsed is not None
+        if collapsed is None:
+            collapsed = True  # Leaflet's own default.
+        kwargs["collapsed"] = collapsed
         self.options = remove_empty(**kwargs)
         self._base_skeleton = base_tree
         self._overlay_skeleton = overlay_tree
@@ -177,6 +195,7 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         self.base_tree = base_tree
         self.overlay_tree = overlay_tree
         self._has_disabled: bool = False
+        self._any_layer_collapsed: bool = False
 
     def render(self, **kwargs):
         from folium.layer_control_utils import (
@@ -188,6 +207,7 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         )
 
         self._has_disabled = False
+        self._any_layer_collapsed = False
 
         if self._auto_build:
             # Collect base / overlay layers from the parent map.
@@ -198,11 +218,12 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
             base_layers = sort_layers(base_layers)
             overlay_layers = sort_layers(overlay_layers)
 
-            # Check whether any layer is disabled (for the JS guard).
+            # Check whether any layer is disabled or wants collapsing.
             for layer in base_layers + overlay_layers:
                 if layer.control_disabled:
                     self._has_disabled = True
-                    break
+                if layer.control_collapsed:
+                    self._any_layer_collapsed = True
 
             # Build trees.
             built_base = build_tree(base_layers, explicit_tree=self._base_skeleton)
@@ -229,5 +250,13 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         else:
             self.base_tree = self._base_skeleton
             self.overlay_tree = self._overlay_skeleton
+
+        # Control-vs-layer priority for the panel-level ``collapsed`` flag:
+        # an explicit TreeLayerControl(collapsed=...) argument always wins;
+        # only when it is left at its default do layer-level
+        # ``control_collapsed`` hints force the panel to start collapsed.
+        # (Node-level ``collapsed`` inside the tree dict is unaffected.)
+        if self._any_layer_collapsed and not self._collapsed_explicit:
+            self.options["collapsed"] = True
 
         super().render()

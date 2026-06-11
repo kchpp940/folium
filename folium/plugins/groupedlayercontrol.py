@@ -39,6 +39,13 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         first, then auto-discovered groups follow in insertion order.
     sort_layers : bool, default True
         Sort layers inside each group by ``control_order``.
+    group_collapsing : bool, optional
+        Whether individual overlay groups can be collapsed by clicking their
+        name.  If omitted (``None``, the default), it is automatically
+        enabled whenever any layer declares ``control_collapsed=True``; the
+        corresponding groups start folded.  If set *explicitly* to True or
+        False the control-level setting always wins — passing False here
+        keeps every group expanded regardless of layer-level hints.
     **kwargs
         Additional (possibly inherited) options. See
         https://leafletjs.com/reference.html#control-layers
@@ -249,10 +256,17 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             if group_has_collapsed.get(group_name, False):
                 self._collapsed_groups.append(idx)
 
-        # Auto-enable groupCollapsing if any group is collapsed, or if
-        # the user explicitly set the option.
+        # Priority rule: an explicit control-level ``group_collapsing``
+        # argument always wins.  If the user disabled it explicitly we must
+        # not auto-collapse any groups either (otherwise the click()
+        # post-processing would still trigger on non-collapsible groups).
+        # If left at the default (None) we honour the layer-level
+        # ``control_collapsed`` hints: enable groupCollapsing and fold the
+        # groups whose layers requested collapsing.
         if self._group_collapsing is not None:
             self.options["groupCollapsing"] = bool(self._group_collapsing)
+            if not self._group_collapsing:
+                self._collapsed_groups = []
         elif self._collapsed_groups:
             self.options["groupCollapsing"] = True
 

@@ -320,9 +320,11 @@ def test_layer_control_disabled_uses_layers_index():
 
 
 def test_layer_control_collapsed_overrides_option():
-    """If any layer has control_collapsed=True, the entire panel must start
-    collapsed, overriding even LayerControl(collapsed=False)."""
-    # 1. No collapsed layers + explicit collapsed=False -> panel open
+    """Priority rule: an explicit ``collapsed`` argument on the control
+    always wins, regardless of layer-level ``control_collapsed`` hints.
+    Layer hints only take effect when the user left the control argument
+    at its default (i.e. did not pass it explicitly)."""
+    # 1. Explicit collapsed=False, no collapsed layers -> stays False
     m1 = Map(tiles=None)
     TileLayer(name="OSM", tiles="OpenStreetMap",
               overlay=False, attr="© OSM").add_to(m1)
@@ -330,20 +332,23 @@ def test_layer_control_collapsed_overrides_option():
     lc1 = LayerControl(collapsed=False).add_to(m1)
     lc1.render()
     assert lc1.options["collapsed"] is False
+    assert lc1._collapsed_explicit is True
 
-    # 2. Explicit collapsed=False BUT one layer has control_collapsed -> True
+    # 2. Explicit collapsed=False BUT a layer has control_collapsed=True
+    #    -> STILL False (control-level explicit setting wins)
     m2 = Map(tiles=None)
     TileLayer(name="OSM", tiles="OpenStreetMap",
               overlay=False, attr="© OSM").add_to(m2)
     GeoJson({}, name="A", control_collapsed=True).add_to(m2)
     lc2 = LayerControl(collapsed=False).add_to(m2)
     lc2.render()
-    assert lc2.options["collapsed"] is True
-    # Also verify the full HTML render actually emits collapsed: true
+    assert lc2.options["collapsed"] is False, \
+        "Explicit control-level collapsed=False must win over layer hints"
+    assert lc2._collapsed_explicit is True
     out2 = m2._parent.render()
-    assert '"collapsed": true' in out2 or "collapsed: true" in out2
+    assert '"collapsed": false' in out2 or "collapsed: false" in out2
 
-    # 3. Default (collapsed=True) + no collapsed layers -> stays True
+    # 3. Default (no explicit collapsed) + no collapsed layers -> default True
     m3 = Map(tiles=None)
     TileLayer(name="OSM", tiles="OpenStreetMap",
               overlay=False, attr="© OSM").add_to(m3)
@@ -351,6 +356,30 @@ def test_layer_control_collapsed_overrides_option():
     lc3 = LayerControl().add_to(m3)
     lc3.render()
     assert lc3.options["collapsed"] is True
+    assert lc3._collapsed_explicit is False
+
+    # 4. Default (no explicit collapsed) + layer has control_collapsed
+    #    -> True (layer hint kicks in)
+    m4 = Map(tiles=None)
+    TileLayer(name="OSM", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m4)
+    GeoJson({}, name="C", control_collapsed=True).add_to(m4)
+    lc4 = LayerControl().add_to(m4)
+    lc4.render()
+    assert lc4.options["collapsed"] is True, \
+        "Layer-level control_collapsed must force panel collapse when " \
+        "control-level argument is left at default"
+    assert lc4._collapsed_explicit is False
+
+    # 5. Explicit collapsed=True + no layer hints -> stays True
+    m5 = Map(tiles=None)
+    TileLayer(name="OSM", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m5)
+    GeoJson({}, name="D").add_to(m5)
+    lc5 = LayerControl(collapsed=True).add_to(m5)
+    lc5.render()
+    assert lc5.options["collapsed"] is True
+    assert lc5._collapsed_explicit is True
 
 
 def test_layer_control_same_label_base_overlay_no_confusion():

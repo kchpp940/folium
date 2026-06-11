@@ -67,9 +67,10 @@ def test_grouped_layer_control_disabled_uses_layers_index():
 
 
 def test_grouped_layer_control_collapsed_groups():
-    """control_collapsed on a layer in GroupedLayerControl must cause the
-    enclosing group to be rendered in the collapsed state by default, and
-    groupCollapsing must be auto-enabled."""
+    """Default behaviour: when a layer declares control_collapsed=True and
+    the user did NOT pass an explicit group_collapsing argument, the
+    enclosing group is rendered collapsed by default and groupCollapsing
+    is auto-enabled."""
     m = folium.Map(tiles=None)
     folium.TileLayer(name="OSM", tiles="OpenStreetMap",
                      overlay=False, attr="© OSM").add_to(m)
@@ -82,8 +83,6 @@ def test_grouped_layer_control_collapsed_groups():
                                control_group=["Misc"]).add_to(m)
 
     lc = groupedlayercontrol.GroupedLayerControl().add_to(m)
-    # Do NOT call lc.render() manually — the control has side effects on
-    # layer.control that would break the subsequent full map render.
     out = m._parent.render()
 
     # groupCollapsing must be enabled automatically
@@ -91,14 +90,58 @@ def test_grouped_layer_control_collapsed_groups():
     assert 'groupCollapsing": true' in out or "groupCollapsing: true" in out
 
     # Post-processing JS that clicks on collapsed group names present.
-    # The template renders: <idx_list>.forEach(function (idx) { ... nameEl.click() })
-    # (the list is the _collapsed_groups value serialised via |tojson, so
-    # the literal text "_collapsed_groups" does not appear in the output).
     assert ".forEach(function (idx)" in out
     assert "leaflet-control-layers-group-name" in out
     assert "nameEl" in out and ("click()" in out or ".click(" in out)
-    # We know group 0 (Pois) is the collapsed one: the index list starts with 0
+    # Group 0 (Pois) is the collapsed one
     assert "[0]" in out or "0].forEach" in out or "0. forEach" in out
 
-    # At minimum the rendering path must be exercised: options include groupCollapsing
     assert lc.options.get("groupCollapsing") is True
+    assert lc._group_collapsing is None  # not explicitly set
+    assert len(lc._collapsed_groups) >= 1
+
+
+def test_grouped_layer_control_group_collapsing_explicit_disable():
+    """Explicit priority rule: passing group_collapsing=False disables all
+    auto-collapsing even when layers declare control_collapsed=True."""
+    m = folium.Map(tiles=None)
+    folium.TileLayer(name="OSM", tiles="OpenStreetMap",
+                     overlay=False, attr="© OSM").add_to(m)
+    fg_a = folium.FeatureGroup(name="Markers",
+                               control_group=["Pois"],
+                               control_collapsed=True).add_to(m)
+
+    lc = groupedlayercontrol.GroupedLayerControl(
+        group_collapsing=False,
+    ).add_to(m)
+    out = m._parent.render()
+
+    # groupCollapsing should be explicitly false in the output
+    assert 'groupCollapsing": false' in out or "groupCollapsing: false" in out
+    # And the collapsed-groups list MUST be empty — no auto-clicking happens
+    assert len(lc._collapsed_groups) == 0, \
+        "Explicit group_collapsing=False must empty _collapsed_groups"
+    # No post-processing click loop when nothing is collapsed
+    # (the {% if %} block in the template guards against it)
+    assert ".forEach(function (idx)" not in out or \
+        "[].forEach" in out  # if for some reason an empty list still triggers
+
+
+def test_grouped_layer_control_group_collapsing_explicit_enable():
+    """Explicit group_collapsing=True enables collapsing even when no layer
+    declares control_collapsed=True (but no group is auto-folded)."""
+    m = folium.Map(tiles=None)
+    folium.TileLayer(name="OSM", tiles="OpenStreetMap",
+                     overlay=False, attr="© OSM").add_to(m)
+    folium.FeatureGroup(name="Markers",
+                        control_group=["Pois"]).add_to(m)
+
+    lc = groupedlayercontrol.GroupedLayerControl(
+        group_collapsing=True,
+    ).add_to(m)
+    out = m._parent.render()
+
+    # groupCollapsing should be true
+    assert 'groupCollapsing": true' in out or "groupCollapsing: true" in out
+    # But no group is auto-collapsed (no layers requested it)
+    assert len(lc._collapsed_groups) == 0

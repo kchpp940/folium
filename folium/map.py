@@ -319,11 +319,12 @@ class LayerControl(MacroElement):
           default: 'topright'
     collapsed : bool, default True
           If true the control will be collapsed into an icon and expanded on
-          mouse hover or touch.  If any participating layer sets its
-          ``control_collapsed`` attribute to True, this value is overridden
-          to True regardless of the argument passed here (so that the
-          ``control_collapsed`` layer-level API has a consistent effect
-          across all three layer controls).
+          mouse hover or touch.  If not passed explicitly (i.e. left at the
+          default) and any participating layer has its ``control_collapsed``
+          attribute set to True, the control is forced to collapsed regardless
+          of the default.  An *explicitly* passed value (True or False)
+          always takes precedence over layer-level hints — this lets you
+          force the panel open even when some layers request collapsing.
     autoZIndex : bool, default True
           If true the control assigns zIndexes in increasing order to all of
           its layers so that the order is preserved when switching them on/off.
@@ -406,7 +407,7 @@ class LayerControl(MacroElement):
     def __init__(
         self,
         position: str = "topright",
-        collapsed: bool = True,
+        collapsed=None,
         autoZIndex: bool = True,
         draggable: bool = False,
         sortLayers: bool = True,
@@ -418,6 +419,12 @@ class LayerControl(MacroElement):
         # sortLayers is always disabled.  The user-facing ``sortLayers``
         # argument controls whether we apply the unified control_order
         # sorting logic.
+        # ``collapsed`` sentinel: None means "default / layer-driven", any
+        # bool is the user's explicit choice and will not be overridden
+        # by layer-level ``control_collapsed`` hints.
+        self._collapsed_explicit = collapsed is not None
+        if collapsed is None:
+            collapsed = True  # Leaflet's own default.
         self.options = remove_empty(
             position=position, collapsed=collapsed, autoZIndex=autoZIndex,
             sortLayers=False, **kwargs,
@@ -474,11 +481,11 @@ class LayerControl(MacroElement):
                 any_collapsed = True
 
         # Unified control_collapsed semantics for the plain LayerControl:
-        # if any participating layer sets control_collapsed=True, the entire
-        # control panel starts collapsed.  This mirrors GroupedLayerControl
-        # and TreeLayerControl where control_collapsed collapses the node
-        # containing the layer.
-        if any_collapsed:
+        # if any participating layer sets control_collapsed=True AND the
+        # caller did NOT pass an explicit ``collapsed`` argument to the
+        # control itself, the entire panel starts collapsed.  An explicit
+        # control-level setting always wins (priority: control > layer).
+        if any_collapsed and not self._collapsed_explicit:
             self.options["collapsed"] = True
 
         super().render()

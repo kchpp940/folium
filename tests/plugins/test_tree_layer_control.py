@@ -102,3 +102,87 @@ def test_tree_layer_control_multi_leaves_per_group():
     disabled_count = out.count('data-folium-disabled=\\"true\\"')
     assert disabled_count == 1, \
         f'Expected exactly 1 disabled node (Layer 3), got {disabled_count}'
+
+
+def test_tree_layer_control_panel_collapsed_priority():
+    """Panel-level collapsed priority: explicit TreeLayerControl(collapsed=...)
+    argument always wins over layer-level control_collapsed hints for the
+    overall control panel.  (Per-node collapsed inside the tree is
+    unaffected by this flag.)"""
+    # 1. Explicit collapsed=False, layer has control_collapsed -> still False
+    m1 = folium.Map(tiles=None)
+    folium.TileLayer(name="OSM", tiles="OpenStreetMap",
+                     overlay=False, attr="© OSM").add_to(m1)
+    FeatureGroup(name='A', control_collapsed=True).add_to(m1)
+    lc1 = TreeLayerControl(collapsed=False).add_to(m1)
+    lc1.render()
+    assert lc1.options["collapsed"] is False
+    assert lc1._collapsed_explicit is True
+
+    # 2. Default (no explicit) + layer has control_collapsed -> True
+    m2 = folium.Map(tiles=None)
+    folium.TileLayer(name="OSM", tiles="OpenStreetMap",
+                     overlay=False, attr="© OSM").add_to(m2)
+    FeatureGroup(name='B', control_collapsed=True).add_to(m2)
+    lc2 = TreeLayerControl().add_to(m2)
+    lc2.render()
+    assert lc2.options["collapsed"] is True
+    assert lc2._collapsed_explicit is False
+
+    # 3. Default (no explicit) + no collapsed layers -> default True
+    m3 = folium.Map(tiles=None)
+    folium.TileLayer(name="OSM", tiles="OpenStreetMap",
+                     overlay=False, attr="© OSM").add_to(m3)
+    FeatureGroup(name='C').add_to(m3)
+    lc3 = TreeLayerControl().add_to(m3)
+    lc3.render()
+    assert lc3.options["collapsed"] is True
+    assert lc3._collapsed_explicit is False
+
+
+def test_tree_layer_control_node_collapsed_explicit_priority():
+    """Within the tree itself: an explicit collapsed attribute on an
+    overlay_tree / base_tree LEAF node overrides the layer's own
+    control_collapsed hint when the two refer to the same leaf."""
+    m = folium.Map()
+    fg = FeatureGroup(name='Paris',
+                      control_group=['POIs', 'Europe'],
+                      control_collapsed=True).add_to(m)
+
+    # The explicit tree sets the Paris *leaf* node to collapsed=False,
+    # overriding the layer-level control_collapsed=True.
+    explicit = {
+        'label': 'POIs',
+        'children': [
+            {
+                'label': 'Europe',
+                'children': [
+                    {
+                        'label': 'Paris',
+                        'layer': fg,
+                        'collapsed': False,  # explicit override of layer hint
+                    }
+                ]
+            }
+        ]
+    }
+    TreeLayerControl(overlay_tree=explicit).add_to(m)
+    out = m._parent.render()
+
+    # In the final JSON the Paris leaf should NOT have "collapsed": true,
+    # because the explicit tree said False (and False is the default,
+    # so it may be omitted entirely).
+    # Look specifically for the Paris leaf entry:
+    import re
+    # Find the "Paris" label block and check it doesn't contain collapsed: true
+    paris_match = re.search(
+        r'"label":\s*"Paris".*?}', out, re.DOTALL,
+    )
+    assert paris_match, "Paris node not found in output"
+    paris_block = paris_match.group()
+    assert '"collapsed": true' not in paris_block and \
+        'collapsed: true' not in paris_block, \
+        f"Paris leaf should not be collapsed (explicit=False wins): {paris_block}"
+
+    # The layer should still be attached to the node
+    assert fg.get_name() in paris_block
