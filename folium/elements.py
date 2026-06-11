@@ -1,5 +1,6 @@
 import base64
 import os
+import warnings
 from functools import wraps
 from typing import Optional
 from urllib.parse import urlparse
@@ -15,12 +16,10 @@ from jinja2 import Template as JinjaTemplate
 
 from folium.template import Template
 from folium.utilities import (
+    ResourceConfig,
     ResourceMode,
     JsCode,
     camelize,
-    get_local_path,
-    get_resource_mode,
-    get_resource_override,
 )
 
 
@@ -35,12 +34,6 @@ def leaflet_method(fn):
 def _url_to_filename(url: str) -> str:
     path = urlparse(url).path
     return os.path.basename(path)
-
-
-def _read_file_to_base64(filepath: str) -> str:
-    with open(filepath, "rb") as f:
-        content = f.read()
-    return base64.b64encode(content).decode("ascii")
 
 
 class InlineJavascriptLink(JavascriptLink):
@@ -87,17 +80,31 @@ class InlineCssLink(CssLink):
         return str(code)
 
 
+def _read_local_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 def _resolve_resource(
     name: str,
     url: str,
-    resource_mode: str,
+    config: ResourceConfig,
     resource_type: str,
-    local_path: Optional[str] = None,
 ) -> tuple[type, str, dict]:
     """Resolve a resource to the appropriate Link class and parameters.
 
+    This is the single unified entry point for all resource resolution.
+    It handles overrides, CDN, inline, and local modes, as well as
+    fallback and error reporting.
+
     Parameters
     ----------
+    name : str
+        The resource identifier (e.g. "leaflet", "Control.Fullscreen.js").
+    url : str
+        The original CDN URL for the resource.
+    config : ResourceConfig
+        The active resource configuration (from Figure context or global).
     resource_type : str
         Either "js" or "css".
     """
@@ -105,86 +112,112 @@ def _resolve_resource(
     RemoteLinkCls = CssLink if is_css else JavascriptLink
     InlineLinkCls = InlineCssLink if is_css else InlineJavascriptLink
 
-    override = get_resource_override(name)
+    override = config.get_override(name)
     if override is not None:
-        if override.startswith(("http://", "https://")):
-            return RemoteLinkCls, override, {"download": False}
-        if override.startswith("data:"):
-            if "," in override:
-                content_b64 = override.split(",", 1)[1]
-                content = base64.b64decode(content_b64).decode("utf-8")
-                return InlineLinkCls, "", {"content": content}
-            return RemoteLinkCls, override, {"download": False}
-        search_paths = []
-        if os.path.isabs(override):
-            search_paths.append(override)
-        else:
-            if local_path:
-                search_paths.append(os.path.join(local_path, override))
-            search_paths.append(override)
-        for path in search_paths:
-            if os.path.exists(path):
-                content = open(path, "r", encoding="utf-8").read()
-                return InlineLinkCls, "", {"content": content}
-        raise FileNotFoundError(
-            f"Resource override for '{name}' not found: {override}. "
-            f"Searched paths: {search_paths}"
-        )
+        try:
+            return _resolve_override(override, local_path=config.local_path, inline_cls=InlineLinkCls, remote_cls=RemoteLinkCls)
+        except FileNotFoundError as exc:
+            warnings.warn(
+                f"Resource override for '{name}' failed: {exc}. "
+                f"Falling back to CDN.",
+                stacklevel=4,
+            )
+            return RemoteLinkCls, url, {"download": False}
 
-    if resource_mode == ResourceMode.CDN:
+    if config.mode == ResourceMode.CDN:
         return RemoteLinkCls, url, {"download": False}
 
-    if resource_mode == ResourceMode.INLINE:
+    if config.mode == ResourceMode.INLINE:
         return InlineLinkCls, url, {"download": True}
 
-    if resource_mode == ResourceMode.LOCAL:
+    if config.mode == ResourceMode.LOCAL:
         filename = _url_to_filename(url)
         search_paths = []
-        if local_path:
-            search_paths.append(os.path.join(local_path, filename))
+        if config.local_path:
+            search_paths.append(os.path.join(config.local_path, filename))
         for path in search_paths:
             if os.path.exists(path):
-                content = open(path, "r", encoding="utf-8").read()
-                return InlineLinkCls, "", {"content": content}
-        raise FileNotFoundError(
+                try:
+                    content = _read_local_file(path)
+                    return InlineLinkCls, "", {"content": content}
+                except OSError as exc:
+                    warnings.warn(
+                        f"Failed to read local resource '{name}' from {path}: {exc}. "
+                        f"Falling back to CDN.",
+                        stacklevel=4,
+                    )
+                    return RemoteLinkCls, url, {"download": False}
+        warnings.warn(
             f"Cannot find local resource '{name}': {filename}. "
-            f"Searched in: {local_path or '(no local_path set)'}. "
-            f"Use set_resource_override('{name}', 'path/to/file') to specify the exact path."
+            f"Searched in: {config.local_path or '(no local_path set)'}. "
+            f"Falling back to CDN. "
+            f"Use set_resource_override('{name}', 'path/to/file') to specify the exact path.",
+            stacklevel=4,
         )
+        return RemoteLinkCls, url, {"download": False}
 
     return RemoteLinkCls, url, {"download": False}
+
+
+def _resolve_override(
+    override: str,
+    local_path: Optional[str],
+    inline_cls: type,
+    remote_cls: type,
+) -> tuple[type, str, dict]:
+    if override.startswith(("http://", "https://")):
+        return remote_cls, override, {"download": False}
+    if override.startswith("data:"):
+        if "," in override:
+            content_b64 = override.split(",", 1)[1]
+            content = base64.b64decode(content_b64).decode("utf-8")
+            return inline_cls, "", {"content": content}
+        return remote_cls, override, {"download": False}
+    search_paths = []
+    if os.path.isabs(override):
+        search_paths.append(override)
+    else:
+        if local_path:
+            search_paths.append(os.path.join(local_path, override))
+        search_paths.append(override)
+    for path in search_paths:
+        if os.path.exists(path):
+            content = _read_local_file(path)
+            return inline_cls, "", {"content": content}
+    raise FileNotFoundError(
+        f"Override path not found: {override}. Searched: {search_paths}"
+    )
+
+
+def _get_resource_config(element: MacroElement) -> ResourceConfig:
+    """Walk up the parent tree to find a ResourceConfig attached to a Figure.
+
+    Resolution order:
+    1. Figure._folium_resource_config (set by Map at construction)
+    2. Global defaults via ResourceConfig.from_global()
+    """
+    root = element.get_root()
+    cfg = getattr(root, "_folium_resource_config", None)
+    if cfg is not None:
+        return cfg
+    return ResourceConfig.from_global()
 
 
 class JSCSSMixin(MacroElement):
     """Render links to external Javascript and CSS resources.
 
-    Supports three resource loading modes (see :class:`ResourceMode`):
-    - ``"cdn"``: Load from CDN URLs (default, backwards compatible)
-    - ``"inline"``: Download resources and inline them directly into HTML
-    - ``"local"``: Use locally cached resource files from ``local_path``
+    The resource loading strategy is resolved at render time by reading the
+    ``_folium_resource_config`` attribute from the root Figure object.  This
+    ensures that the Map and **all** its child plugins share the same
+    ``resource_mode`` / ``local_path`` / overrides — there is no per-instance
+    ``resource_mode`` on JSCSSMixin itself.
 
-    The resource mode can be set globally via :func:`folium.set_resource_mode`
-    or per-instance via the ``resource_mode`` parameter.
+    To set the strategy for a map, pass ``resource_mode`` to
+    :class:`folium.Map` or call :func:`folium.set_resource_mode` globally.
     """
 
     default_js: list[tuple[str, str]] = []
     default_css: list[tuple[str, str]] = []
-
-    def __init__(
-        self,
-        *args,
-        resource_mode: Optional[str] = None,
-        local_path: Optional[str] = None,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.resource_mode = resource_mode
-        self.local_path = local_path
-
-    def _get_effective_resource_mode(self) -> tuple[str, Optional[str]]:
-        mode = self.resource_mode or get_resource_mode()
-        local = self.local_path or get_local_path()
-        return mode, local
 
     # Since this is typically used as a mixin, we cannot
     # override the _template member variable here. It would
@@ -196,18 +229,18 @@ class JSCSSMixin(MacroElement):
             figure, Figure
         ), "You cannot render this Element if it is not in a Figure."
 
-        resource_mode, local_path = self._get_effective_resource_mode()
+        config = _get_resource_config(self)
 
         for name, url in self.default_js:
             link_cls, resolved_url, link_kwargs = _resolve_resource(
-                name, url, resource_mode, "js", local_path
+                name, url, config, "js"
             )
             js_link = link_cls(resolved_url, **link_kwargs)
             figure.header.add_child(js_link, name=name)
 
         for name, url in self.default_css:
             link_cls, resolved_url, link_kwargs = _resolve_resource(
-                name, url, resource_mode, "css", local_path
+                name, url, config, "css"
             )
             css_link = link_cls(resolved_url, **link_kwargs)
             figure.header.add_child(css_link, name=name)

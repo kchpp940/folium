@@ -470,12 +470,57 @@ _global_local_path: Optional[str] = None
 _global_resource_overrides: dict[str, str] = {}
 
 
+class ResourceConfig:
+    """Immutable resource configuration that can be attached to a Figure.
+
+    This is the single source of truth for resource loading strategy.
+    Resolution order: per-resource overrides → mode-specific behaviour → fallback.
+    """
+
+    __slots__ = ("mode", "local_path", "overrides")
+
+    def __init__(
+        self,
+        mode: str = ResourceMode.CDN,
+        local_path: Optional[str] = None,
+        overrides: Optional[dict[str, str]] = None,
+    ):
+        if mode not in _VALID_RESOURCE_MODES:
+            raise ValueError(
+                f"Invalid resource_mode '{mode}'. "
+                f"Must be one of: {_VALID_RESOURCE_MODES}"
+            )
+        if mode == ResourceMode.LOCAL and local_path is None:
+            raise ValueError(
+                "resource_mode='local' requires local_path to be specified"
+            )
+        self.mode = mode
+        self.local_path = local_path
+        self.overrides = dict(overrides) if overrides else {}
+
+    def get_override(self, name: str) -> Optional[str]:
+        return self.overrides.get(name)
+
+    @classmethod
+    def from_global(cls) -> "ResourceConfig":
+        return cls(
+            mode=_global_resource_mode,
+            local_path=_global_local_path,
+            overrides=_global_resource_overrides,
+        )
+
+    def with_overrides(self, extra_overrides: dict[str, str]) -> "ResourceConfig":
+        merged = {**self.overrides, **extra_overrides}
+        return ResourceConfig(
+            mode=self.mode, local_path=self.local_path, overrides=merged
+        )
+
+
 def get_resource_mode() -> str:
     return _global_resource_mode
 
 
-def set_resource_mode(
-    mode: str, local_path: Optional[str] = None) -> None:
+def set_resource_mode(mode: str, local_path: Optional[str] = None) -> None:
     global _global_resource_mode, _global_local_path
     if mode not in _VALID_RESOURCE_MODES:
         raise ValueError(

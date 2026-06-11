@@ -15,6 +15,7 @@ from folium.map import Evented, FitBounds, Layer
 from folium.raster_layers import TileLayer
 from folium.template import Template
 from folium.utilities import (
+    ResourceConfig,
     TypeBounds,
     TypeJsonValue,
     _parse_size,
@@ -156,13 +157,16 @@ class Map(JSCSSMixin, Evented):
         The font size to use for Leaflet, can either be a number or a
         string ending in 'rem', 'em', or 'px'.
     resource_mode : str, default None
-        Controls how JS/CSS resources are loaded. Options:
+        Controls how JS/CSS resources are loaded for **this map and all its
+        child plugins**. Options:
 
         - ``"cdn"``: Load from CDN URLs (default, backwards compatible)
         - ``"inline"``: Download resources and inline them directly into HTML
         - ``"local"``: Use locally cached resource files from ``local_path``
 
         If None, falls back to the global setting (see :func:`folium.set_resource_mode`).
+        The chosen mode is stored on the root Figure so that every plugin added
+        to this map inherits the same strategy.
     local_path : str, default None
         Directory path where local resource files are stored. Required when
         ``resource_mode="local"``. Ignored for other modes.
@@ -308,20 +312,26 @@ class Map(JSCSSMixin, Evented):
         local_path: Optional[str] = None,
         **kwargs: TypeJsonValue,
     ):
-        JSCSSMixin.__init__(self, resource_mode=resource_mode, local_path=local_path)
+        super().__init__()
         self._name = "Map"
 
         self._png_image: Optional[bytes] = None
         self.png_enabled = png_enabled
 
         if location is None:
-            # If location is not passed we center and zoom out.
             self.location = [0.0, 0.0]
             zoom_start = 1
         else:
             self.location = validate_location(location)
 
         Figure().add_child(self)
+
+        if resource_mode is not None or local_path is not None:
+            effective_mode = resource_mode or "cdn"
+            self._parent._folium_resource_config = ResourceConfig(
+                mode=effective_mode,
+                local_path=local_path,
+            )
 
         # Map Size Parameters.
         self.width = _parse_size(width)

@@ -44,6 +44,7 @@ from folium.map import (
 from folium.raster_layers import TileLayer, WmsTileLayer
 from folium.utilities import (
     JsCode,
+    ResourceConfig,
     ResourceMode,
     clear_resource_overrides,
     get_local_path,
@@ -106,6 +107,7 @@ __all__ = [
     "Marker",
     "Popup",
     "RegularPolygonMarker",
+    "ResourceConfig",
     "ResourceMode",
     "StepColormap",
     "TileLayer",
