@@ -6,4 +6,3 @@ Features
 
   features/fit_overlays
   features/click_related_classes
-  features/event_binding

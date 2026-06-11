@@ -35,12 +35,9 @@ from folium.folium import Map
 from folium.map import Class, FeatureGroup, Icon, Layer, Marker, Popup, Tooltip
 from folium.template import Template
 from folium.utilities import (
-    EventHandlerSpec,
-    EventMixin,
     JsCode,
     TypeBoundsReturn,
     TypeContainer,
-    TypeEventHandlers,
     TypeJsonValue,
     TypeLine,
     TypePathOptions,
@@ -77,14 +74,6 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
         Input text or visualization for object displayed when clicking.
     tooltip: str or folium.Tooltip, optional
         Display a text when hovering over the object.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs:
         See vector layers path_options for additional arguments.
 
@@ -98,7 +87,6 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
                 {{ this.location|tojson }},
                 {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -117,12 +105,9 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
         radius: int = 15,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(
-            location, popup=popup, tooltip=tooltip, events=events
-        )
+        super().__init__(location, popup=popup, tooltip=tooltip)
         self._name = "RegularPolygonMarker"
         self.options = path_options(line=False, radius=radius, **kwargs)
         self.options.update(
@@ -476,7 +461,7 @@ class VegaLite(MacroElement):
         )
 
 
-class GeoJson(EventMixin, Layer):
+class GeoJson(Layer):
     """
     Creates a GeoJson object for plotting into a Map.
 
@@ -529,24 +514,6 @@ class GeoJson(EventMixin, Layer):
         Javascript code to be called on each feature.
         See https://leafletjs.com/examples/geojson/
         `onEachFeature` for more information.
-    feature_events: dict, default None
-        Dictionary mapping event names to event handlers. These events are
-        bound to **individual feature layers** inside the onEachFeature
-        callback, so each GeoJSON feature gets its own event handler.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
-    layer_events: dict, default None
-        Dictionary mapping event names to event handlers. These events are
-        bound to the **GeoJson layer as a whole** (not individual features).
-        Same format as `feature_events` parameter.
-        Useful for layer-level events like 'layeradd', 'layerremove', etc.
-    events: dict, default None
-        Backward-compatible alias for `feature_events`. If both `events`
-        and `feature_events` are provided, a ``ValueError`` is raised.
     **kwargs
         Keyword arguments are passed to the geoJson object as extra options.
 
@@ -568,22 +535,6 @@ class GeoJson(EventMixin, Layer):
     ...     )
     ... }
     >>> GeoJson(geojson, style_function=style_function)
-
-    >>> # Bind feature-level click events with predefined action
-    >>> GeoJson(geojson, feature_events={"click": "alert"})
-
-    >>> # Bind both feature-level and layer-level events
-    >>> GeoJson(
-    ...     geojson,
-    ...     feature_events={
-    ...         "click": "function(e) { console.log(e.target.feature); }",
-    ...         "mouseover": "highlight",
-    ...         "mouseout": "reset_highlight",
-    ...     },
-    ...     layer_events={
-    ...         "layeradd": "log",
-    ...     }
-    ... )
 
     See Also
     --------
@@ -683,10 +634,6 @@ class GeoJson(EventMixin, Layer):
                     }
                 }
                 {%- endif %}
-                {%- if this._render_on_each_feature_events() %}
-                ,
-                {{ this._render_on_each_feature_events() }}
-                {%- endif %}
             });
         };
         var {{ this.get_name() }} = L.geoJson(null, {
@@ -718,8 +665,6 @@ class GeoJson(EventMixin, Layer):
         {{this.get_name()}}.setStyle(function(feature) {return feature.properties.style;});
         {%- endif %}
 
-        {% if this.has_layer_events() %}{{ this._render_layer_event_bindings() }}{% endif %}
-
         {% endmacro %}
         """)  # noqa
 
@@ -740,27 +685,9 @@ class GeoJson(EventMixin, Layer):
         zoom_on_click: bool = False,
         on_each_feature: Optional[JsCode] = None,
         marker: Union[Circle, CircleMarker, Marker, None] = None,
-        feature_events: Optional[TypeEventHandlers] = None,
-        layer_events: Optional[TypeEventHandlers] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: Any,
     ):
-        if events is not None and feature_events is not None:
-            raise ValueError(
-                "GeoJson received both `events` and `feature_events`. "
-                "The `events` parameter is a backward-compatible alias for "
-                "`feature_events`; use only `feature_events` (for per-feature "
-                "handlers) and `layer_events` (for whole-layer handlers) to "
-                "avoid ambiguity."
-            )
-        resolved_feature_events = feature_events if feature_events is not None else events
-        super().__init__(
-            events=resolved_feature_events,
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
-        )
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "GeoJson"
         self.embed = embed
         self.embed_link: Optional[str] = None
@@ -786,13 +713,6 @@ class GeoJson(EventMixin, Layer):
         self.on_each_feature = on_each_feature
         self.options = remove_empty(**kwargs)
 
-        self._layer_event_handlers: dict[str, EventHandlerSpec] = {}
-        if layer_events:
-            if not isinstance(layer_events, dict):
-                raise TypeError("layer_events must be a dictionary")
-            for event_name, handler in layer_events.items():
-                self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
-
         self.data = self.process_data(data)
 
         if self.style or self.highlight:
@@ -813,84 +733,6 @@ class GeoJson(EventMixin, Layer):
             self.add_child(Tooltip(tooltip))
         if isinstance(popup, (GeoJsonPopup, Popup)):
             self.add_child(popup)
-
-    def set_layer_event(
-        self, event_name: str, handler: Union[str, JsCode, Any]
-    ) -> None:
-        """Set a single layer-level event handler.
-
-        Layer-level events are bound to the GeoJson layer as a whole,
-        not to individual feature layers.
-
-        Parameters
-        ----------
-        event_name : str
-            Name of the event (e.g., 'layeradd', 'layerremove').
-        handler : str, JsCode
-            The event handler to bind. Same format as `feature_events` parameter.
-        """
-        self._layer_event_handlers[event_name] = EventHandlerSpec(handler)
-
-    def remove_layer_event(self, event_name: str) -> bool:
-        """Remove a layer-level event handler. Returns True if handler existed."""
-        if event_name in self._layer_event_handlers:
-            del self._layer_event_handlers[event_name]
-            return True
-        return False
-
-    def has_layer_events(self) -> bool:
-        """Check if any layer-level event handlers are configured."""
-        return bool(self._layer_event_handlers)
-
-    def clear_layer_events(self) -> None:
-        """Remove all layer-level event handlers."""
-        self._layer_event_handlers.clear()
-
-    def _render_layer_event_bindings(self) -> str:
-        """Generate JavaScript code for binding layer-level events."""
-        if not self._layer_event_handlers:
-            return ""
-        lines = []
-        import json
-
-        for event_name, event_handler in self._layer_event_handlers.items():
-            lines.append(
-                f"{self.get_name()}.on({json.dumps(event_name)}, "
-                f"{event_handler.to_javascript()});"
-            )
-        return "\n".join(lines)
-
-    def _absorb_event_handler(self, event_handler: Any) -> bool:
-        """Absorb an elements.EventHandler for GeoJson.
-
-        For GeoJson, the absorbed handler goes into the layer-level
-        ``_layer_event_handlers`` dict (bound to the GeoJson layer as a
-        whole via ``{name}.on(event, handler)``). This matches the
-        original ``add_child(EventHandler(...))`` behavior where the
-        handler was rendered as ``{parent_name}.on(...)``.
-
-        If an event with the same name already exists in
-        ``_layer_event_handlers`` or ``_event_handlers`` (set via
-        ``feature_events`` / ``layer_events``), a warning is issued
-        and the ``EventHandler`` is ignored.
-        """
-        from folium.elements import EventHandler as _LegacyEventHandler
-
-        if not isinstance(event_handler, _LegacyEventHandler):
-            return False
-        event_name = event_handler.event
-        if event_name in self._layer_event_handlers or event_name in self._event_handlers:
-            import warnings
-            warnings.warn(
-                f"Event '{event_name}' already set via `feature_events` or "
-                f"`layer_events` parameter. The add_child(EventHandler(...)) "
-                f"call for the same event is ignored to avoid duplicate bindings.",
-                UserWarning,
-                stacklevel=4,
-            )
-            return True
-        self._layer_event_handlers[event_name] = EventHandlerSpec(event_handler.handler)
-        return True
 
     def process_data(self, data: Any) -> dict:
         """Convert an unknown data input into a geojson dictionary."""
@@ -2108,16 +1950,6 @@ class ColorLine(FeatureGroup):
     -------
     A ColorLine object that you can `add_to` a Map.
 
-    Notes
-    -----
-    ColorLine renders each colored segment as a separate ``PolyLine`` child.
-    To bind interaction events (``click``, ``mouseover``, etc.) to the
-    segments, iterate over ``_children`` after construction and set
-    events on each PolyLine, e.g.::
-
-        for child in colorline._children.values():
-            if isinstance(child, folium.PolyLine):
-                child.set_event("click", "alert")
     """
 
     def __init__(

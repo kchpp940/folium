@@ -4,15 +4,13 @@ Wraps leaflet Polyline, Polygon, Rectangle, Circle, and CircleMarker
 """
 
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 from branca.element import MacroElement
 
 from folium.map import Marker, Popup, Tooltip
 from folium.template import Template
 from folium.utilities import (
-    EventMixin,
-    TypeEventHandlers,
     TypeLine,
     TypeMultiLine,
     TypePathOptions,
@@ -128,7 +126,7 @@ def path_options(
     return default
 
 
-class BaseMultiLocation(EventMixin, MacroElement):
+class BaseMultiLocation(MacroElement):
     """Base class for vector classes with multiple coordinates.
 
     :meta private:
@@ -140,9 +138,8 @@ class BaseMultiLocation(EventMixin, MacroElement):
         locations: TypeMultiLine,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
     ):
-        super().__init__(events=events)
+        super().__init__()
         self.locations = validate_multi_locations(locations)
         if popup is not None:
             self.add_child(popup if isinstance(popup, Popup) else Popup(str(popup)))
@@ -176,14 +173,6 @@ class PolyLine(BaseMultiLocation):
         and less means more accurate representation.
     no_clip: Bool, default False
         Disable polyline clipping.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#polyline
@@ -196,19 +185,11 @@ class PolyLine(BaseMultiLocation):
                 {{ this.locations|tojson }},
                 {{ this.options|tojson }}
             ).addTo({{this._parent.get_name()}});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
-    def __init__(
-        self,
-        locations,
-        popup=None,
-        tooltip=None,
-        events: Optional[TypeEventHandlers] = None,
-        **kwargs
-    ):
-        super().__init__(locations, popup=popup, tooltip=tooltip, events=events)
+    def __init__(self, locations, popup=None, tooltip=None, **kwargs):
+        super().__init__(locations, popup=popup, tooltip=tooltip)
         self._name = "PolyLine"
         self.options = path_options(line=True, **kwargs)
 
@@ -229,14 +210,6 @@ class Polygon(BaseMultiLocation):
         Input text or visualization for object displayed when clicking.
     tooltip: str or folium.Tooltip, default None
         Display a text when hovering over the object.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#polygon
@@ -249,7 +222,6 @@ class Polygon(BaseMultiLocation):
                 {{ this.locations|tojson }},
                 {{ this.options|tojson }}
             ).addTo({{this._parent.get_name()}});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -258,15 +230,14 @@ class Polygon(BaseMultiLocation):
         locations: TypeMultiLine,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(locations, popup=popup, tooltip=tooltip, events=events)
+        super().__init__(locations, popup=popup, tooltip=tooltip)
         self._name = "Polygon"
         self.options = path_options(line=True, radius=None, **kwargs)
 
 
-class Rectangle(EventMixin, MacroElement):
+class Rectangle(MacroElement):
     """Draw rectangle overlays on a map.
 
     See :func:`folium.vector_layers.path_options` for the `Path` options.
@@ -279,14 +250,6 @@ class Rectangle(EventMixin, MacroElement):
         Input text or visualization for object displayed when clicking.
     tooltip: str or folium.Tooltip, default None
         Display a text when hovering over the object.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#rectangle
@@ -299,7 +262,6 @@ class Rectangle(EventMixin, MacroElement):
                 {{ this.locations|tojson }},
                 {{ this.options|tojson }}
             ).addTo({{this._parent.get_name()}});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -308,10 +270,9 @@ class Rectangle(EventMixin, MacroElement):
         bounds: TypeLine,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(events=events)
+        super().__init__()
         self._name = "rectangle"
         self.options = path_options(line=True, radius=None, **kwargs)
         self.locations = validate_locations(bounds)
@@ -347,14 +308,6 @@ class Circle(Marker):
         Display a text when hovering over the object.
     radius: float
         Radius of the circle, in meters.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#circle
@@ -367,7 +320,6 @@ class Circle(Marker):
                 {{ this.location|tojson }},
                 {{ this.options|tojson }}
             ).addTo({{ this._parent.get_name() }});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -377,12 +329,9 @@ class Circle(Marker):
         radius: float = 50,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(
-            location, popup=popup, tooltip=tooltip, events=events
-        )
+        super().__init__(location, popup=popup, tooltip=tooltip)
         self._name = "circle"
         self.options = path_options(line=False, radius=radius, **kwargs)
 
@@ -403,14 +352,6 @@ class CircleMarker(Marker):
         Display a text when hovering over the object.
     radius: float, default 10
         Radius of the circle marker, in pixels.
-    events: dict, default None
-        Dictionary mapping event names to event handlers.
-        Keys can be: 'click', 'dblclick', 'mouseover', 'mouseout', etc.
-        Values can be:
-        - Global JS function name (str)
-        - Inline function body starting with 'function' (str)
-        - JsCode object with inline function
-        - Predefined action: 'zoom', 'alert', 'log', 'highlight', etc.
     **kwargs
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#circlemarker
@@ -423,7 +364,6 @@ class CircleMarker(Marker):
                 {{ this.location|tojson }},
                 {{ this.options|tojson }}
             ).addTo({{ this._parent.get_name() }});
-            {% if this.has_events() %}{{ this._render_event_bindings(this.get_name()) }}{% endif %}
         {% endmacro %}
         """)
 
@@ -433,11 +373,8 @@ class CircleMarker(Marker):
         radius: float = 10,
         popup: Union[Popup, str, None] = None,
         tooltip: Union[Tooltip, str, None] = None,
-        events: Optional[TypeEventHandlers] = None,
         **kwargs: TypePathOptions,
     ):
-        super().__init__(
-            location, popup=popup, tooltip=tooltip, events=events
-        )
+        super().__init__(location, popup=popup, tooltip=tooltip)
         self._name = "CircleMarker"
         self.options = path_options(line=False, radius=radius, **kwargs)

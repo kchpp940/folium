@@ -85,20 +85,3 @@ folium.Polygon(
 
 m
 ```
-
-### 事件绑定
-
-`Polygon` 支持通过 `events` 参数绑定交互事件（`click`、`mouseover` 等），例如：
-
-```python
-folium.Polygon(
-    locations=[...],
-    events={
-        "click": "zoom",
-        "mouseover": "highlight",
-        "mouseout": "reset_highlight",
-    },
-)
-```
-
-完整的使用说明请参见 [事件绑定](../features/event_binding.md) 文档。
