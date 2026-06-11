@@ -79,11 +79,19 @@ class MiniMap(JSCSSMixin, MacroElement):
             name="Control_MiniMap_js",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.js",
             type="js",
+            plugin="MiniMap",
+            package="leaflet-minimap",
+            version="3.6.1",
+            kind="plugin",
         ),
         Resource(
             name="Control_MiniMap_css",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.css",
             type="css",
+            plugin="MiniMap",
+            package="leaflet-minimap",
+            version="3.6.1",
+            kind="plugin",
         ),
     ]
     default_js, default_css = build_defaults(resources)

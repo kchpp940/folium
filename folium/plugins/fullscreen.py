@@ -41,11 +41,19 @@ class Fullscreen(JSCSSMixin, MacroElement):
             name="Control.Fullscreen.js",
             url="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.min.js",
             type="js",
+            plugin="Fullscreen",
+            package="leaflet.fullscreen",
+            version="3.0.0",
+            kind="plugin",
         ),
         Resource(
             name="Control.FullScreen.css",
             url="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.css",
             type="css",
+            plugin="Fullscreen",
+            package="leaflet.fullscreen",
+            version="3.0.0",
+            kind="plugin",
         ),
     ]
     default_js, default_css = build_defaults(resources)

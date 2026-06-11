@@ -1,5 +1,17 @@
 """Wrap some of the most popular leaflet external plugins."""
 
+from folium.plugins._resources import (
+    AuditIssue,
+    Resource,
+    audit_all_resources,
+    build_defaults,
+    clear_registry,
+    collect_plugin_resources,
+    get_registry,
+    register_resources,
+    validate_resource,
+    validate_resource_list,
+)
 from folium.plugins.antpath import AntPath
 from folium.plugins.beautify_icon import BeautifyIcon
 from folium.plugins.boat_marker import BoatMarker

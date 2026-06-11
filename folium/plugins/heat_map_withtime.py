@@ -1,5 +1,6 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import none_max, none_min
 
@@ -185,30 +186,54 @@ class HeatMapWithTime(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "iso8601",
-            "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js",
+    resources = [
+        Resource(
+            name="iso8601",
+            url="https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js",
+            type="js",
+            plugin="HeatMapWithTime",
+            package="iso8601-js-period",
+            version="0.2.1",
+            kind="dependency",
         ),
-        (
-            "leaflet.timedimension.min.js",
-            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js",
+        Resource(
+            name="leaflet.timedimension.min.js",
+            url="https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js",
+            type="js",
+            plugin="HeatMapWithTime",
+            package="leaflet-timedimension",
+            version="1.1.1",
+            kind="plugin",
         ),
-        (
-            "heatmap.min.js",
-            "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_hm.min.js",
+        Resource(
+            name="heatmap.min.js",
+            url="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_hm.min.js",
+            type="js",
+            plugin="HeatMapWithTime",
+            package=None,
+            version=None,
+            kind="dependency",
         ),
-        (
-            "leaflet-heatmap.js",
-            "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_leaflet_hm.min.js",
+        Resource(
+            name="leaflet-heatmap.js",
+            url="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_leaflet_hm.min.js",
+            type="js",
+            plugin="HeatMapWithTime",
+            package=None,
+            version=None,
+            kind="dependency",
+        ),
+        Resource(
+            name="leaflet.timedimension.control.min.css",
+            url="https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css",
+            type="css",
+            plugin="HeatMapWithTime",
+            package="leaflet-timedimension",
+            version="1.1.1",
+            kind="plugin",
         ),
     ]
-    default_css = [
-        (
-            "leaflet.timedimension.control.min.css",
-            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

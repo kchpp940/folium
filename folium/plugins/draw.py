@@ -144,11 +144,19 @@ class Draw(JSCSSMixin, MacroElement):
             name="leaflet_draw_js",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.js",
             type="js",
+            plugin="Draw",
+            package="leaflet.draw",
+            version="1.0.2",
+            kind="plugin",
         ),
         Resource(
             name="leaflet_draw_css",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.css",
             type="css",
+            plugin="Draw",
+            package="leaflet.draw",
+            version="1.0.2",
+            kind="plugin",
         ),
     ]
     default_js, default_css = build_defaults(resources)

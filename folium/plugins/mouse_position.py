@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -58,18 +59,27 @@ class MousePosition(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    default_js = [
-        (
-            "Control_MousePosition_js",
-            "https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.js",
-        )
+    resources = [
+        Resource(
+            name="Control_MousePosition_js",
+            url="https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.js",
+            type="js",
+            plugin="MousePosition",
+            package="Leaflet.MousePosition",
+            version=None,
+            kind="plugin",
+        ),
+        Resource(
+            name="Control_MousePosition_css",
+            url="https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.css",
+            type="css",
+            plugin="MousePosition",
+            package="Leaflet.MousePosition",
+            version=None,
+            kind="plugin",
+        ),
     ]
-    default_css = [
-        (
-            "Control_MousePosition_css",
-            "https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

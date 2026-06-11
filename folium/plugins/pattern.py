@@ -2,6 +2,7 @@ from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
 from folium.folium import Map
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import get_obj_in_upper_tree, remove_empty
 
@@ -40,9 +41,18 @@ class StripePattern(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    default_js = [
-        ("pattern", "https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js")
+    resources = [
+        Resource(
+            name="pattern",
+            url="https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js",
+            type="js",
+            plugin="StripePattern",
+            package="Leaflet.pattern",
+            version=None,
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,
@@ -114,9 +124,18 @@ class CirclePattern(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    default_js = [
-        ("pattern", "https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js")
+    resources = [
+        Resource(
+            name="pattern",
+            url="https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js",
+            type="js",
+            plugin="CirclePattern",
+            package="Leaflet.pattern",
+            version=None,
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

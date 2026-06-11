@@ -60,6 +60,10 @@ class HeatMap(JSCSSMixin, Layer):
             name="leaflet-heat.js",
             url="https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js",
             type="js",
+            plugin="HeatMap",
+            package=None,
+            version=None,
+            kind="plugin",
         ),
     ]
     default_js, default_css = build_defaults(resources)

@@ -3,6 +3,7 @@ from typing import Union
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -109,18 +110,27 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
     >>> control = TreeLayerControl(overlay_tree=overlay_tree).add_to(m)
     """
 
-    default_js = [
-        (
-            "L.Control.Layers.Tree.min.js",
-            "https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.js",  # noqa
+    resources = [
+        Resource(
+            name="L.Control.Layers.Tree.min.js",
+            url="https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.js",
+            type="js",
+            plugin="TreeLayerControl",
+            package="leaflet.control.layers.tree",
+            version="1.1.0",
+            kind="plugin",
+        ),
+        Resource(
+            name="L.Control.Layers.Tree.min.css",
+            url="https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.css",
+            type="css",
+            plugin="TreeLayerControl",
+            package="leaflet.control.layers.tree",
+            version="1.1.0",
+            kind="plugin",
         ),
     ]
-    default_css = [
-        (
-            "L.Control.Layers.Tree.min.css",
-            "https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.css",  # noqa
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     _template = Template("""
         {% macro script(this,kwargs) %}

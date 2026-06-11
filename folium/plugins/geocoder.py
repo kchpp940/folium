@@ -3,6 +3,7 @@ from typing import Optional
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -55,18 +56,27 @@ class Geocoder(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    default_js = [
-        (
-            "Control.Geocoder.js",
-            "https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js",
-        )
+    resources = [
+        Resource(
+            name="Control.Geocoder.js",
+            url="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js",
+            type="js",
+            plugin="Geocoder",
+            package="leaflet-control-geocoder",
+            version=None,
+            kind="plugin",
+        ),
+        Resource(
+            name="Control.Geocoder.css",
+            url="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css",
+            type="css",
+            plugin="Geocoder",
+            package="leaflet-control-geocoder",
+            version=None,
+            kind="plugin",
+        ),
     ]
-    default_css = [
-        (
-            "Control.Geocoder.css",
-            "https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

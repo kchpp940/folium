@@ -6,6 +6,7 @@ Based on leaflet plugin: https://github.com/domoritz/leaflet-locatecontrol
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -55,18 +56,27 @@ class LocateControl(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "Control_locate_min_js",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.js",
-        )
+    resources = [
+        Resource(
+            name="Control_locate_min_js",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.js",
+            type="js",
+            plugin="LocateControl",
+            package="leaflet-locatecontrol",
+            version="0.66.2",
+            kind="plugin",
+        ),
+        Resource(
+            name="Control_locate_min_css",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.css",
+            type="css",
+            plugin="LocateControl",
+            package="leaflet-locatecontrol",
+            version="0.66.2",
+            kind="plugin",
+        ),
     ]
-    default_css = [
-        (
-            "Control_locate_min_css",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(self, auto_start=False, **kwargs):
         super().__init__()

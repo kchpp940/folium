@@ -61,16 +61,28 @@ class MarkerCluster(JSCSSMixin, Layer):
             name="markerclusterjs",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
             type="js",
+            plugin="MarkerCluster",
+            package="leaflet.markercluster",
+            version="1.1.0",
+            kind="plugin",
         ),
         Resource(
             name="markerclustercss",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
             type="css",
+            plugin="MarkerCluster",
+            package="leaflet.markercluster",
+            version="1.1.0",
+            kind="plugin",
         ),
         Resource(
             name="markerclusterdefaultcss",
             url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
             type="css",
+            plugin="MarkerCluster",
+            package="leaflet.markercluster",
+            version="1.1.0",
+            kind="plugin",
         ),
     ]
     default_js, default_css = build_defaults(resources)

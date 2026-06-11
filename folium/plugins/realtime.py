@@ -3,6 +3,7 @@ from typing import Optional, Union
 from folium.elements import JSCSSMixin
 from folium.features import GeoJson
 from folium.map import FeatureGroup
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import JsCode, remove_empty
 
@@ -82,12 +83,18 @@ class Realtime(JSCSSMixin, FeatureGroup):
         {% endmacro %}
     """)
 
-    default_js = [
-        (
-            "Leaflet_Realtime_js",
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-realtime/2.2.0/leaflet-realtime.js",
-        )
+    resources = [
+        Resource(
+            name="Leaflet_Realtime_js",
+            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-realtime/2.2.0/leaflet-realtime.js",
+            type="js",
+            plugin="Realtime",
+            package="leaflet-realtime",
+            version="2.2.0",
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

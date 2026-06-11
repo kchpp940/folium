@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -48,30 +49,54 @@ class TagFilterButton(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "tag-filter-button.js",
-            "https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.js",
+    resources = [
+        Resource(
+            name="tag-filter-button.js",
+            url="https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.js",
+            type="js",
+            plugin="TagFilterButton",
+            package="leaflet-tag-filter-button",
+            version=None,
+            kind="plugin",
         ),
-        (
-            "easy-button.js",
-            "https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.js",
+        Resource(
+            name="easy-button.js",
+            url="https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.js",
+            type="js",
+            plugin="TagFilterButton",
+            package="leaflet-easybutton",
+            version="2",
+            kind="dependency",
+        ),
+        Resource(
+            name="tag-filter-button.css",
+            url="https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.css",
+            type="css",
+            plugin="TagFilterButton",
+            package="leaflet-tag-filter-button",
+            version=None,
+            kind="plugin",
+        ),
+        Resource(
+            name="easy-button.css",
+            url="https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.css",
+            type="css",
+            plugin="TagFilterButton",
+            package="leaflet-easybutton",
+            version="2",
+            kind="dependency",
+        ),
+        Resource(
+            name="ripples.min.css",
+            url="https://cdn.jsdelivr.net/npm/css-ripple-effect@1.0.5/dist/ripple.min.css",
+            type="css",
+            plugin="TagFilterButton",
+            package="css-ripple-effect",
+            version="1.0.5",
+            kind="dependency",
         ),
     ]
-    default_css = [
-        (
-            "tag-filter-button.css",
-            "https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.css",
-        ),
-        (
-            "easy-button.css",
-            "https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.css",
-        ),
-        (
-            "ripples.min.css",
-            "https://cdn.jsdelivr.net/npm/css-ripple-effect@1.0.5/dist/ripple.min.css",
-        ),
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

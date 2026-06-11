@@ -1,5 +1,6 @@
 from folium.elements import JSCSSMixin
 from folium.map import Marker
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 from folium.vector_layers import path_options
@@ -48,12 +49,18 @@ class SemiCircle(JSCSSMixin, Marker):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "semicirclejs",
-            "https://cdn.jsdelivr.net/npm/leaflet-semicircle@2.0.4/Semicircle.min.js",
-        )
+    resources = [
+        Resource(
+            name="semicirclejs",
+            url="https://cdn.jsdelivr.net/npm/leaflet-semicircle@2.0.4/Semicircle.min.js",
+            type="js",
+            plugin="SemiCircle",
+            package="leaflet-semicircle",
+            version="2.0.4",
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

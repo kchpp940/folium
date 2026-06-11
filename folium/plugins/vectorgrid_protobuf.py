@@ -2,6 +2,7 @@ from typing import Optional, Union
 
 from folium.elements import JSCSSMixin
 from folium.map import Layer
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 
 
@@ -114,12 +115,18 @@ class VectorGridProtobuf(JSCSSMixin, Layer):
             {%- endmacro %}
             """)
 
-    default_js = [
-        (
-            "vectorGrid",
-            "https://unpkg.com/leaflet.vectorgrid@latest/dist/Leaflet.VectorGrid.bundled.js",
-        )
+    resources = [
+        Resource(
+            name="vectorGrid",
+            url="https://unpkg.com/leaflet.vectorgrid@latest/dist/Leaflet.VectorGrid.bundled.js",
+            type="js",
+            plugin="VectorGridProtobuf",
+            package="leaflet.vectorgrid",
+            version="latest",
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

@@ -2,6 +2,7 @@ from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
 from folium.raster_layers import WmsTileLayer
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -87,34 +88,63 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "jquery3.7.1",
-            "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js",
+    resources = [
+        Resource(
+            name="jquery3.7.1",
+            url="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js",
+            type="js",
+            plugin="TimestampedWmsTileLayers",
+            package="jquery",
+            version="3.7.1",
+            kind="dependency",
         ),
-        (
-            "jqueryui1.10.2",
-            "https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.2/jquery-ui.min.js",
+        Resource(
+            name="jqueryui1.10.2",
+            url="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.2/jquery-ui.min.js",
+            type="js",
+            plugin="TimestampedWmsTileLayers",
+            package="jqueryui",
+            version="1.10.2",
+            kind="dependency",
         ),
-        (
-            "iso8601",
-            "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js",
+        Resource(
+            name="iso8601",
+            url="https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js",
+            type="js",
+            plugin="TimestampedWmsTileLayers",
+            package="iso8601-js-period",
+            version="0.2.1",
+            kind="dependency",
         ),
-        (
-            "leaflet.timedimension",
-            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js",
+        Resource(
+            name="leaflet.timedimension",
+            url="https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js",
+            type="js",
+            plugin="TimestampedWmsTileLayers",
+            package="leaflet-timedimension",
+            version="1.1.1",
+            kind="plugin",
+        ),
+        Resource(
+            name="highlight.js_css",
+            url="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/styles/default.min.css",
+            type="css",
+            plugin="TimestampedWmsTileLayers",
+            package="highlight.js",
+            version="8.4",
+            kind="dependency",
+        ),
+        Resource(
+            name="leaflet.timedimension_css",
+            url="https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css",
+            type="css",
+            plugin="TimestampedWmsTileLayers",
+            package="leaflet-timedimension",
+            version="1.1.1",
+            kind="plugin",
         ),
     ]
-    default_css = [
-        (
-            "highlight.js_css",
-            "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/styles/default.min.css",
-        ),
-        (
-            "leaflet.timedimension_css",
-            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css",
-        ),
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

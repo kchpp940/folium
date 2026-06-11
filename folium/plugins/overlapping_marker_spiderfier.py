@@ -4,6 +4,7 @@ from jinja2 import Template
 
 from folium.elements import Element, JSCSSMixin, MacroElement
 from folium.map import Marker
+from folium.plugins._resources import Resource, build_defaults
 from folium.utilities import parse_options
 
 
@@ -60,12 +61,18 @@ class OverlappingMarkerSpiderfier(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "overlappingmarkerjs",
-            "https://cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js",
-        )
+    resources = [
+        Resource(
+            name="overlappingmarkerjs",
+            url="https://cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js",
+            type="js",
+            plugin="OverlappingMarkerSpiderfier",
+            package="OverlappingMarkerSpiderfier-Leaflet",
+            version="0.2.6",
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

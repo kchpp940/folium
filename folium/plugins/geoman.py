@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin, leaflet_method
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -72,18 +73,27 @@ class GeoMan(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "leaflet_geoman_js",
-            "https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js",
-        )
+    resources = [
+        Resource(
+            name="leaflet_geoman_js",
+            url="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js",
+            type="js",
+            plugin="GeoMan",
+            package="@geoman-io/leaflet-geoman-free",
+            version="latest",
+            kind="plugin",
+        ),
+        Resource(
+            name="leaflet_geoman_css",
+            url="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css",
+            type="css",
+            plugin="GeoMan",
+            package="@geoman-io/leaflet-geoman-free",
+            version="latest",
+            kind="plugin",
+        ),
     ]
-    default_css = [
-        (
-            "leaflet_geoman_css",
-            "https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(self, position="topleft", feature_group=None, on=None, **kwargs):
         super().__init__()

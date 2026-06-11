@@ -1,6 +1,7 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -69,18 +70,27 @@ class BeautifyIcon(JSCSSMixin, MacroElement):
         None,
     ]
 
-    default_js = [
-        (
-            "beautify_icon_js",
-            "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js",
-        )
+    resources = [
+        Resource(
+            name="beautify_icon_js",
+            url="https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js",
+            type="js",
+            plugin="BeautifyIcon",
+            package="BeautifyMarker",
+            version=None,
+            kind="plugin",
+        ),
+        Resource(
+            name="beautify_icon_css",
+            url="https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css",
+            type="css",
+            plugin="BeautifyIcon",
+            package="BeautifyMarker",
+            version=None,
+            kind="plugin",
+        ),
     ]
-    default_css = [
-        (
-            "beautify_icon_css",
-            "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css",
-        )
-    ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

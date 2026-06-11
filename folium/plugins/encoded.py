@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 from folium.elements import JSCSSMixin
 from folium.features import MacroElement
+from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.vector_layers import path_options
 
@@ -32,12 +33,18 @@ class _BaseFromEncoded(JSCSSMixin, MacroElement, ABC):
         {% endmacro %}
         """)
 
-    default_js = [
-        (
-            "polyline-encoded",
-            "https://cdn.jsdelivr.net/npm/polyline-encoded@0.0.9/Polyline.encoded.js",
-        )
+    resources = [
+        Resource(
+            name="polyline-encoded",
+            url="https://cdn.jsdelivr.net/npm/polyline-encoded@0.0.9/Polyline.encoded.js",
+            type="js",
+            plugin="Encoded",
+            package="polyline-encoded",
+            version="0.0.9",
+            kind="plugin",
+        ),
     ]
+    default_js, default_css = build_defaults(resources)
 
     def __init__(self, encoded: str):
         super().__init__()
