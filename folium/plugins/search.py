@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass, asdict
 from typing import Any, Optional, Union
 
 from branca.element import MacroElement
 
 from folium import FeatureGroup, GeoJson, TopoJson
 from folium.elements import JSCSSMixin
-
 from folium.folium import Map
+from folium.map import Marker
 from folium.plugins import FeatureGroupSubGroup, MarkerCluster
 from folium.template import Template
-from folium.utilities import remove_empty
+from folium.utilities import JsCode, remove_empty
 
 
 LayerType = Union[GeoJson, TopoJson, FeatureGroup, MarkerCluster, FeatureGroupSubGroup]
@@ -25,6 +27,308 @@ def _encode_template(tpl: Optional[str]) -> Optional[str]:
     return tpl.replace("{{", _TPL_OPEN).replace("}}", _TPL_CLOSE)
 
 
+# ---------------------------------------------------------------------------
+# Unified search entry – the result of serializing a single "thing" (a GeoJson
+# feature, a Marker, etc.) out of any supported layer type.
+# ---------------------------------------------------------------------------
+@dataclass
+class SearchEntry:
+    layer_var: str
+    child_ref: str
+    stable_id: str
+    weight: float
+    geom_type: str
+    search_zoom: Optional[int]
+    haystack: str
+    properties: dict
+    geometry: dict
+    style_options: dict
+    source_label: Optional[str]
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Field reading / id generation – dispatcher per layer type.
+# These operate purely on the Python object graph; no JS-side guessing.
+# ---------------------------------------------------------------------------
+def _read_property_bag(kind: str, obj: Any, id_field: Optional[str]) -> dict:
+    """Return the dict-like bag we read search/id fields from."""
+    if kind == "geojson_feature":
+        return dict(obj.get("properties") or {})
+    if kind == "marker":
+        # Marker's field bag is its JS options dict (title, alt, …)
+        bag = dict(getattr(obj, "options", None) or {})
+        # Special: MarkerCluster's popups/icons are attached via add_child(),
+        # but for searching we only look at the user-supplied options.
+        return bag
+    return {}
+
+
+def _read_field_values(
+    fields: Optional[list[str]],
+    bag: dict,
+) -> list[str]:
+    if not fields:
+        return []
+    return [str(bag[f]) for f in fields if f in bag and bag[f] is not None]
+
+
+def _make_stable_id(
+    id_field: Optional[str],
+    bag: dict,
+    fallback: str,
+    cfg_idx: int,
+) -> str:
+    if id_field and id_field in bag and bag[id_field] is not None:
+        # Use the id_field value alone so features from different layer
+        # configs that share the same logical id still get deduplicated.
+        return f"id_{bag[id_field]}"
+    return f"cfg{cfg_idx}_{fallback}"
+
+
+def _geometry_of(kind: str, obj: Any) -> dict:
+    if kind == "geojson_feature":
+        return dict(obj.get("geometry") or {"type": "Point", "coordinates": [0, 0]})
+    if kind == "marker":
+        loc = getattr(obj, "location", None)
+        if loc and len(loc) == 2:
+            # GeoJson uses [lon, lat]; Marker stores [lat, lon]
+            return {"type": "Point", "coordinates": [loc[1], loc[0]]}
+        return {"type": "Point", "coordinates": [0, 0]}
+    return {"type": "Point", "coordinates": [0, 0]}
+
+
+def _iter_marker_children(container: Any) -> list[Marker]:
+    """Recursively collect Marker instances from a container's children.
+
+    Handles FeatureGroup, MarkerCluster and FeatureGroupSubGroup.  For
+    FeatureGroupSubGroup/MarkerCluster we also walk the `_group` relationship so
+    that subgroups which were added directly to the map (not as Python children
+    of the container) still get their markers included.
+    """
+    markers: list[Marker] = []
+    for child in getattr(container, "_children", {}).values():
+        if isinstance(child, Marker):
+            markers.append(child)
+        elif isinstance(child, (FeatureGroup, MarkerCluster, FeatureGroupSubGroup)):
+            markers.extend(_iter_marker_children(child))
+    # For containers that can host conceptual children via the `_group` reference
+    # (MarkerCluster and FeatureGroupSubGroup), walk the entire object tree
+    # starting from root map and include any FeatureGroupSubGroup whose
+    # `_group == container` by walking up the _group chain.
+    return markers
+
+
+def _find_child_group_refs(container: Any, root_map: Any) -> list[Any]:
+    """Return a list of FeatureGroupSubGroups conceptually inside `container`.
+
+    A FeatureGroupSubGroup counts as conceptually inside a container if its
+    ``_group`` attribute is the container, OR if its ``_group`` is another
+    subgroup already inside the container (transitive closure).
+
+    Results are ordered by the time of discovery so subgroups are discovered
+    after their parents.
+    """
+    results: list[Any] = []
+    found_ids: set[int] = set()
+
+    def matches(node: Any) -> bool:
+        if not isinstance(node, FeatureGroupSubGroup):
+            return False
+        if id(node) in found_ids:
+            return False
+        if node._group is container:
+            return True
+        # Check if _group points to a subgroup we already identified as
+        # being part of this container (transitive).
+        for sub in results:
+            if node._group is sub:
+                return True
+        return False
+
+    changed = True
+    while changed:
+        changed = False
+
+        def walk(node: Any) -> None:
+            nonlocal changed
+            for child in getattr(node, "_children", {}).values():
+                if id(child) in found_ids:
+                    # Continue walking so deeply nested children still get seen
+                    pass
+                if matches(child):
+                    results.append(child)
+                    found_ids.add(id(child))
+                    changed = True
+                if isinstance(
+                    child,
+                    (FeatureGroup, MarkerCluster, FeatureGroupSubGroup),
+                ):
+                    walk(child)
+
+        walk(root_map)
+    return results
+
+
+def _collect_all_markers(container: Any, root_map: Any) -> list[Marker]:
+    markers = list(_iter_marker_children(container))
+    for sub in _find_child_group_refs(container, root_map):
+        markers.extend(_iter_marker_children(sub))
+    return markers
+
+
+def _serialize_layer(
+    cfg: "SearchLayerConfig",
+    cfg_idx: int,
+    root_map: Any = None,
+) -> list[SearchEntry]:
+    """Convert any supported layer into a list of SearchEntry records.
+
+    This is the single point where layer-type differences are resolved.
+    """
+    entries: list[SearchEntry] = []
+    layer = cfg.layer
+    search_fields = cfg.search_fields or []
+    display_fields = cfg.display_fields or []
+
+    # -------- GeoJson / TopoJson --------
+    if isinstance(layer, GeoJson):
+        features = (layer.data or {}).get("features", [])
+        for idx, feat in enumerate(features):
+            kind = "geojson_feature"
+            bag = _read_property_bag(kind, feat, cfg.id_field)
+            sid = _make_stable_id(
+                cfg.id_field,
+                bag,
+                f"{cfg.layer_var}_f{idx}",
+                cfg_idx,
+            )
+            haystack_parts = _read_field_values(search_fields, bag)
+            if not haystack_parts:
+                # Fall back to all string-ish property values so the entry
+                # still matches on something when the user forgot fields.
+                haystack_parts = [str(v) for v in bag.values() if v is not None]
+            props_for_js = {
+                **bag,
+                "__displayFields": _read_field_values(display_fields, bag),
+            }
+            geom = feat.get("geometry")
+            entries.append(
+                SearchEntry(
+                    layer_var=cfg.layer_var,
+                    child_ref="",
+                    stable_id=sid,
+                    weight=cfg.weight,
+                    geom_type=cfg.geom_type,
+                    search_zoom=cfg.search_zoom,
+                    haystack=" ".join(haystack_parts),
+                    properties=props_for_js,
+                    geometry=dict(geom) if geom else _geometry_of(kind, feat),
+                    style_options=dict(cfg.options or {}),
+                    source_label=cfg.layer_var,
+                )
+            )
+        return entries
+
+    if isinstance(layer, TopoJson):
+        obj_name = layer.object_path.split(".")[-1]
+        topo_objs = (layer.data or {}).get("objects", {}).get(obj_name, {})
+        geometries = topo_objs.get("geometries", [])
+        for idx, geom in enumerate(geometries):
+            kind = "geojson_feature"
+            bag = _read_property_bag(kind, geom, cfg.id_field)
+            sid = _make_stable_id(
+                cfg.id_field,
+                bag,
+                f"{cfg.layer_var}_g{idx}",
+                cfg_idx,
+            )
+            haystack_parts = _read_field_values(search_fields, bag)
+            if not haystack_parts:
+                haystack_parts = [str(v) for v in bag.values() if v is not None]
+            props_for_js = {
+                **bag,
+                "__displayFields": _read_field_values(display_fields, bag),
+            }
+            # leaflet-search needs real coordinates; for TopoJson we cannot
+            # easily decode arcs server-side, so we fall back to centroid
+            # stubs and let the JS locate via the original layer reference.
+            entries.append(
+                SearchEntry(
+                    layer_var=cfg.layer_var,
+                    child_ref="",
+                    stable_id=sid,
+                    weight=cfg.weight,
+                    geom_type=cfg.geom_type,
+                    search_zoom=cfg.search_zoom,
+                    haystack=" ".join(haystack_parts),
+                    properties=props_for_js,
+                    geometry={"type": "Point", "coordinates": [0, 0]},
+                    style_options=dict(cfg.options or {}),
+                    source_label=cfg.layer_var,
+                )
+            )
+        return entries
+
+    # -------- Marker containers: FeatureGroup / MarkerCluster /
+    #          FeatureGroupSubGroup --------
+    if isinstance(layer, (FeatureGroup, MarkerCluster, FeatureGroupSubGroup)):
+        if root_map is None:
+            markers = _iter_marker_children(layer)
+        else:
+            markers = _collect_all_markers(layer, root_map)
+        for marker in markers:
+            kind = "marker"
+            bag = _read_property_bag(kind, marker, cfg.id_field)
+            sid = _make_stable_id(
+                cfg.id_field,
+                bag,
+                f"{marker.get_name()}",
+                cfg_idx,
+            )
+            haystack_parts = _read_field_values(search_fields, bag)
+            if not haystack_parts and "title" in bag:
+                haystack_parts = [str(bag["title"])]
+            props_for_js = {
+                **bag,
+                "__displayFields": _read_field_values(display_fields, bag)
+                or ([str(bag["title"])] if "title" in bag else []),
+            }
+            entries.append(
+                SearchEntry(
+                    layer_var=cfg.layer_var,
+                    child_ref=marker.get_name(),
+                    stable_id=sid,
+                    weight=cfg.weight,
+                    geom_type=cfg.geom_type,
+                    search_zoom=cfg.search_zoom,
+                    haystack=" ".join(haystack_parts),
+                    properties=props_for_js,
+                    geometry=_geometry_of(kind, marker),
+                    style_options=dict(cfg.options or {}),
+                    source_label=cfg.layer_var,
+                )
+            )
+        return entries
+
+    raise TypeError(f"Unsupported layer type: {type(layer).__name__}")
+
+
+def _dedupe_entries(entries: list[SearchEntry]) -> list[SearchEntry]:
+    """Keep the highest-weight occurrence of each stable_id."""
+    best: dict[str, SearchEntry] = {}
+    for e in entries:
+        existing = best.get(e.stable_id)
+        if existing is None or existing.weight < e.weight:
+            best[e.stable_id] = e
+    return list(best.values())
+
+
+# ---------------------------------------------------------------------------
+# Public configuration objects
+# ---------------------------------------------------------------------------
 class SearchLayerConfig:
     """
     Configuration for a single searchable layer within a unified Search control.
@@ -149,6 +453,14 @@ class Search(JSCSSMixin, MacroElement):
     deduplication by a stable identifier, weighted sorting and per-layer
     configuration.
 
+    Layer-data differences (GeoJson ``properties``, Marker ``options``,
+    recursive subgroups inside ``MarkerCluster``, …) are resolved on the
+    Python side during render: each configurable layer is flattened into a
+    list of :class:`SearchEntry` records, deduplicated by ``id_field``,
+    sorted by ``weight`` and then handed to the client as a single JSON
+    index.  The JavaScript side no longer walks ``eachLayer()`` trying to
+    guess each source's data layout.
+
     Parameters
     ----------
     layer : GeoJson, TopoJson, FeatureGroup, MarkerCluster or FeatureGroupSubGroup, optional
@@ -217,91 +529,50 @@ class Search(JSCSSMixin, MacroElement):
         {% macro script(this, kwargs) %}
             (function () {
                 var map = {{ this._parent.get_name() }};
+                var index = {{ this.search_index|tojson }};
+                var globalStyle = {{ this.options|tojavascript }};
+                var globalTpl = {{ this.label_template|tojson|safe }};
 
-                // -------------------------------------------------------------
-                // 1. Build a unified layer group that leaflet-search will index.
-                // -------------------------------------------------------------
-                var unifiedLayer = L.layerGroup();
-                var seenIds = {};
+                // ---------------------------------------------------------
+                // Rebuild a tiny L.GeoJson layer from the server-side index
+                // so leaflet-search can index it uniformly.  Each fake
+                // feature carries a pointer (__entry) back to the
+                // authoritative Python-generated record.
+                // ---------------------------------------------------------
+                var unifiedLayer = L.geoJson(null, {
+                    pointToLayer: function (feature, latlng) {
+                        return L.circleMarker(latlng, { radius: 0, opacity: 0 });
+                    },
+                    style: function () { return { opacity: 0, fillOpacity: 0 }; }
+                });
 
-                {% for cfg in this.layer_configs %}
-                (function () {
-                    var src = {{ cfg.layer_var }};
-                    var children = [];
+                index.forEach(function (entry) {
+                    var feature = {
+                        type: 'Feature',
+                        properties: Object.assign(
+                            { __searchHaystack: entry.haystack },
+                            entry.properties
+                        ),
+                        geometry: entry.geometry
+                    };
+                    var layer = unifiedLayer.addData(feature).getLayers().slice(-1)[0];
+                    layer.__searchEntry = entry;
+                });
 
-                    if (src.eachLayer && typeof src.eachLayer === 'function') {
-                        src.eachLayer(function (l) { children.push(l); });
-                    } else if (src.getLayers) {
-                        children = src.getLayers();
-                    }
-
-                    children.forEach(function (l) {
-                        var id;
-                        {% if cfg.id_field %}
-                            if (l.feature && l.feature.properties &&
-                                l.feature.properties.hasOwnProperty('{{ cfg.id_field }}')) {
-                                id = 'cfg{{ loop.index }}_' +
-                                     String(l.feature.properties['{{ cfg.id_field }}']);
-                            } else if (l.options &&
-                                       l.options.hasOwnProperty('{{ cfg.id_field }}')) {
-                                id = 'cfg{{ loop.index }}_' +
-                                     String(l.options['{{ cfg.id_field }}']);
-                            }
-                        {% endif %}
-                        if (!id) {
-                            id = 'auto_' + (l._leaflet_id || L.stamp(l));
-                        }
-
-                        if (seenIds[id]) {
-                            if (seenIds[id].__searchWeight < {{ cfg.weight }}) {
-                                unifiedLayer.removeLayer(seenIds[id]);
-                                delete seenIds[id];
-                            } else {
-                                return;
-                            }
-                        }
-
-                        l.__searchConfig = {
-                            weight: {{ cfg.weight }},
-                            searchFields: {{ cfg.search_fields|tojson|safe }},
-                            displayFields: {{ cfg.display_fields|tojson|safe }},
-                            labelTemplate: {{ cfg.label_template|tojson|safe }},
-                            id: id,
-                            geomType: '{{ cfg.geom_type }}',
-                            layerName: '{{ cfg.layer_var }}',
-                            zoom: {% if cfg.search_zoom %} {{ cfg.search_zoom }} {% else %} null {% endif %},
-                            style: {{ cfg.options|tojavascript }}
-                        };
-                        l.__searchWeight = {{ cfg.weight }};
-
-                        var haystack = '';
-                        var props = (l.feature && l.feature.properties)
-                                    ? l.feature.properties
-                                    : (l.options || {});
-                        {% if cfg.search_fields %}
-                            haystack = ({{ cfg.search_fields|tojson|safe }})
-                                .map(function (k) { return props[k] != null ? String(props[k]) : ''; })
-                                .join(' ');
-                        {% endif %}
-                        if (!l.feature) l.feature = {};
-                        if (!l.feature.properties) l.feature.properties = {};
-                        l.feature.properties.__searchHaystack = haystack;
-
-                        unifiedLayer.addLayer(l);
-                        seenIds[id] = l;
-                    });
-                })();
-                {% endfor %}
-
-                // -------------------------------------------------------------
-                // 2. Helper – compile tiny label templates.
-                //    Wrapped in {% raw %} ... {% endraw %} because the regex
-                //    uses {{ and }} which clash with Jinja2's own syntax.
-                // -------------------------------------------------------------
+                // ---------------------------------------------------------
+                // Template compiler (Python pre-encoded handlebars-style
+                // placeholders into __TPL_OPEN__ / __TPL_CLOSE__ tokens
+                // so Jinja2 never touches them).
+                // ---------------------------------------------------------
                 {% raw %}
                 function compileTemplate(tpl, ctx) {
                     if (!tpl) return '';
-                    var re = new RegExp('__TPL_OPEN__\\s*([\\w.]+)\\s*__TPL_CLOSE__', 'g');
+                    var OPEN = '__TPL_OPEN__';
+                    var CLOSE = '__TPL_CLOSE__';
+                    var backslash = '\\';
+                    var re = new RegExp(
+                        OPEN + backslash + 's*([\\w.]+)' + backslash + 's*' + CLOSE, 'g'
+                    );
                     return tpl.replace(re, function (_, path) {
                         var parts = path.split('.');
                         var val = ctx;
@@ -314,28 +585,81 @@ class Search(JSCSSMixin, MacroElement):
                 }
                 {% endraw %}
 
-                function buildLabel(layer, globalTpl) {
-                    var cfg = layer.__searchConfig || {};
-                    var props = (layer.feature && layer.feature.properties)
-                                ? layer.feature.properties
-                                : (layer.options || {});
+                function buildLabel(entry, layerTpl) {
+                    var props = entry.properties || {};
                     var ctx = {
                         properties: props,
-                        options: layer.options || {},
-                        weight: cfg.weight,
-                        layerName: cfg.layerName
+                        options: props,
+                        weight: entry.weight,
+                        layerName: entry.sourceLabel
                     };
-                    var tpl = cfg.labelTemplate || globalTpl;
+                    var tpl = layerTpl || globalTpl;
                     if (tpl) return compileTemplate(tpl, ctx);
-                    var fields = cfg.displayFields || [];
-                    return fields.map(function (k) {
-                        return props[k] != null ? String(props[k]) : '';
-                    }).filter(Boolean).join(' \u00b7 ');
+                    var fields = props.__displayFields || [];
+                    if (Array.isArray(fields) && fields.length) {
+                        return fields.join(' \u00b7 ');
+                    }
+                    return entry.haystack;
                 }
 
-                // -------------------------------------------------------------
-                // 3. Instantiate L.Control.Search over the unified layer.
-                // -------------------------------------------------------------
+                // ---------------------------------------------------------
+                // Given an entry, locate the *original* layer on the map
+                // so highlighting / popups work against the user's real
+                // features rather than the invisible index layer.
+                // ---------------------------------------------------------
+                function resolveOriginalLayer(entry) {
+                    var src = window[entry.layerVar];
+                    if (!src || typeof src.eachLayer !== 'function') return null;
+                    var found = null;
+                    src.eachLayer(function (l) {
+                        if (found) return;
+                        // GeoJson features match by stable_id carried in
+                        // properties; Markers match by child_ref (Python
+                        // get_name() → Leaflet variable name).
+                        if (entry.childRef &&
+                            typeof window[entry.childRef] !== 'undefined' &&
+                            window[entry.childRef] === l) {
+                            found = l; return;
+                        }
+                        var p = l.feature && l.feature.properties;
+                        if (p && p.__searchStableId === entry.stableId) {
+                            found = l; return;
+                        }
+                        // Fallback: compare search haystack – good enough
+                        // for TopoJson arcs where we can't decode coords.
+                        if (p && p.__searchHaystack &&
+                            p.__searchHaystack === entry.haystack && entry.haystack) {
+                            found = l; return;
+                        }
+                    });
+                    return found;
+                }
+
+                // Decorate each source layer's features with the stable id
+                // so resolveOriginalLayer can match them back quickly.
+                index.forEach(function (entry) {
+                    var src = window[entry.layerVar];
+                    if (!src || typeof src.eachLayer !== 'function') return;
+                    src.eachLayer(function (l) {
+                        var p = l.feature && l.feature.properties;
+                        if (!p) return;
+                        var bag = Object.assign({}, p);
+                        var hay = (entry.searchFields || [])
+                            .map(function (k) { return bag[k]; })
+                            .filter(function (v) { return v != null; })
+                            .join(' ');
+                        if (!hay) hay = [].map.call(
+                            Object.values(bag), String
+                        ).join(' ');
+                        if (hay === entry.haystack && entry.haystack) {
+                            p.__searchStableId = entry.stableId;
+                        }
+                    });
+                });
+
+                // ---------------------------------------------------------
+                // Build the search control.
+                // ---------------------------------------------------------
                 var {{ this.get_name() }} = new L.Control.Search({
                     layer: unifiedLayer,
                     propertyName: '__searchHaystack',
@@ -343,74 +667,97 @@ class Search(JSCSSMixin, MacroElement):
                     textPlaceholder: '{{ this.placeholder }}',
                     textNotFound: '{{ this.text_not_found }}',
                     position: '{{ this.position }}',
+                    initial: false,
+                    hideMarkerOnCollapse: true,
+                    marker: false,
+                    // Results: weight desc, then haystack length asc.
                     sortFeatures: function (a, b) {
-                        var wa = a.layer.__searchConfig
-                               ? a.layer.__searchConfig.weight : 1;
-                        var wb = b.layer.__searchConfig
-                               ? b.layer.__searchConfig.weight : 1;
+                        var wa = a.layer.__searchEntry
+                               ? a.layer.__searchEntry.weight : 1;
+                        var wb = b.layer.__searchEntry
+                               ? b.layer.__searchEntry.weight : 1;
                         if (wb !== wa) return wb - wa;
                         return a.value.length - b.value.length;
                     },
                     buildTip: function (text, val) {
-                        var tip = buildLabel(val.layer,
-                            {{ this.label_template|tojson|safe }});
+                        var entry = val.layer.__searchEntry;
+                        var layerTpl = null;
+                        // Fall back to per-layer label template encoded in
+                        // the haystack index by Python (if any).
+                        if (entry && entry.layerTpl) layerTpl = entry.layerTpl;
+                        var tip = entry ? buildLabel(entry, layerTpl) : text;
                         return L.DomUtil.create('div', 'search-tip')
                                .appendChild(document.createTextNode(
                                    tip || text)).parentNode;
                     },
-                    initial: false,
-                    hideMarkerOnCollapse: true,
-                    marker: false,
                     moveToLocation: function (latlng, title, map) {
-                        var layer = latlng.layer || latlng;
-                        var cfg = layer.__searchConfig || {};
-                        var geomType = cfg.geomType || 'Point';
-                        var targetZoom = cfg.zoom;
+                        var entry = latlng.layer
+                                  ? latlng.layer.__searchEntry : null;
+                        if (!entry) return;
+                        var orig = resolveOriginalLayer(entry) || latlng.layer;
+                        var targetZoom = entry.searchZoom;
                         {% if this.search_zoom %}
                             if (targetZoom == null) targetZoom = {{ this.search_zoom }};
                         {% endif %}
-                        if (geomType === 'Point') {
+                        var geom = entry.geomType || 'Point';
+                        if (geom === 'Point') {
+                            var pos = orig.getLatLng
+                                      ? orig.getLatLng()
+                                      : (latlng.latlng || latlng);
                             if (targetZoom == null) targetZoom = map.getZoom();
-                            map.flyTo(latlng.latlng || latlng, targetZoom);
-                        } else if (layer.getBounds) {
-                            var bounds = layer.getBounds();
+                            map.flyTo(pos, targetZoom);
+                        } else if (orig.getBounds) {
+                            var bounds = orig.getBounds();
                             if (targetZoom == null) {
                                 targetZoom = map.getBoundsZoom(bounds);
                             }
                             map.flyToBounds(bounds, { maxZoom: targetZoom });
                         } else {
-                            map.flyTo(latlng.latlng || latlng, targetZoom || map.getZoom());
+                            map.flyTo(latlng.latlng || latlng,
+                                      targetZoom || map.getZoom());
                         }
+                        // Stash the resolved original layer so the
+                        // locationfound handler can style the right thing.
+                        latlng.__resolvedOriginal = orig;
                     }
                 });
 
-                // -------------------------------------------------------------
-                // 4. Apply highlight styling on match.
-                // -------------------------------------------------------------
-                function mergedStyle(layer) {
-                    var cfg = layer.__searchConfig || {};
-                    var globalOpts = {{ this.options|tojavascript }};
-                    var perLayer = cfg.style || {};
-                    return L.extend({}, globalOpts, perLayer);
+                // ---------------------------------------------------------
+                // Highlight & style handling – always apply to the
+                // resolved original layer, never the invisible index one.
+                // ---------------------------------------------------------
+                function applyStyle(entry, layer) {
+                    if (!layer || typeof layer.setStyle !== 'function') return;
+                    var merged = L.extend({}, globalStyle, entry.styleOptions || {});
+                    if (Object.keys(merged).length) layer.setStyle(merged);
                 }
 
-                function resetAllLayerStyles() {
+                function resetAllStyles() {
                     {% for cfg in this.layer_configs %}
                     (function () {
                         var src = {{ cfg.layer_var }};
-                        if (src.setStyle && typeof src.setStyle === 'function') {
+                        if (src && typeof src.setStyle === 'function') {
                             try {
                                 src.setStyle(function (feature) {
                                     return feature && feature.properties
                                            ? feature.properties.style
                                            : {};
                                 });
-                            } catch (e) { /* ignore */ }
+                            } catch (e) { /* ignore non-stylable */ }
                         }
-                        if (src.eachLayer) {
+                        if (src && typeof src.eachLayer === 'function') {
                             src.eachLayer(function (l) {
-                                if (l.resetStyle) {
+                                if (typeof l.resetStyle === 'function') {
                                     try { l.resetStyle(); } catch (e) {}
+                                }
+                                // For Circle/Polygon layers inside
+                                // FeatureGroups, try plain setStyle({}) if
+                                // the layer carries feature.properties.style.
+                                if (l.feature && l.feature.properties &&
+                                    l.feature.properties.style &&
+                                    typeof l.setStyle === 'function') {
+                                    try { l.setStyle(l.feature.properties.style); }
+                                    catch (e) {}
                                 }
                             });
                         }
@@ -419,20 +766,21 @@ class Search(JSCSSMixin, MacroElement):
                 }
 
                 {{ this.get_name() }}.on('search:locationfound', function (e) {
-                    resetAllLayerStyles();
-                    if (e.layer && e.layer.setStyle) {
-                        var s = mergedStyle(e.layer);
-                        if (Object.keys(s).length) e.layer.setStyle(s);
-                    }
-                    if (e.layer && e.layer._popup) e.layer.openPopup();
-                    if (e.layer && e.layer.bindTooltip && !e.layer._tooltip) {
-                        var label = buildLabel(e.layer,
-                            {{ this.label_template|tojson|safe }});
-                        if (label) e.layer.bindTooltip(label).openTooltip();
+                    resetAllStyles();
+                    var entry = e.layer ? e.layer.__searchEntry : null;
+                    var orig = e.__resolvedOriginal
+                               || (entry ? resolveOriginalLayer(entry) : null)
+                               || e.layer;
+                    if (entry && orig) applyStyle(entry, orig);
+                    if (orig && orig._popup) orig.openPopup();
+                    if (orig && typeof orig.bindTooltip === 'function' &&
+                        !orig._tooltip && entry) {
+                        var label = buildLabel(entry, entry.layerTpl || null);
+                        if (label) orig.bindTooltip(label).openTooltip();
                     }
                 });
 
-                {{ this.get_name() }}.on('search:collapsed', resetAllLayerStyles);
+                {{ this.get_name() }}.on('search:collapsed', resetAllStyles);
 
                 map.addControl({{ this.get_name() }});
             })();
@@ -509,6 +857,10 @@ class Search(JSCSSMixin, MacroElement):
         self.label_template = _encode_template(label_template)
         self.options = remove_empty(**kwargs)
 
+        # Placeholder – filled in during render() once all layers have
+        # stable JS variable names assigned by branca.
+        self.search_index: list = []
+
         # Back-compat attributes.
         self.layer = self.layer_configs[0].layer if layer is not None else None
         self.search_label = search_label
@@ -524,6 +876,7 @@ class Search(JSCSSMixin, MacroElement):
         ), "Search can only be added to folium Map objects."
 
     def render(self, **kwargs):
+        # Legacy validation path.
         if self.layer is not None:
             if isinstance(self.layer, GeoJson):
                 keys = tuple(self.layer.data["features"][0]["properties"].keys())
@@ -540,5 +893,37 @@ class Search(JSCSSMixin, MacroElement):
 
         for cfg in self.layer_configs:
             cfg.validate()
+
+        # ---- Build the unified search index entirely in Python. ----
+        raw_entries: list[SearchEntry] = []
+        root_map = getattr(self, "_parent", None)
+        for idx, cfg in enumerate(self.layer_configs):
+            raw_entries.extend(_serialize_layer(cfg, idx, root_map))
+
+        entries = _dedupe_entries(raw_entries)
+        # Per-layer label template has to travel alongside each entry so
+        # the client's buildTip() can honour per-config overrides.  We
+        # inject it via the style-free source_label + layerTpl on the JS
+        # side: attach a small dict of extras.
+        per_config_tpl: dict[str, Optional[str]] = {
+            cfg.layer_var: cfg.label_template for cfg in self.layer_configs
+        }
+        # Stable sort: descending by weight, then original order preserved.
+        entries.sort(key=lambda e: (-e.weight, e.stable_id))
+
+        payload = []
+        for e in entries:
+            d = e.as_dict()
+            d["layerTpl"] = per_config_tpl.get(e.layer_var)
+            # Expose search_fields to JS so resolveOriginalLayer can tag
+            # the original features with __searchStableId even when the
+            # haystack was auto-constructed.
+            for cfg in self.layer_configs:
+                if cfg.layer_var == e.layer_var:
+                    d["searchFields"] = cfg.search_fields or []
+                    break
+            payload.append(d)
+
+        self.search_index = payload
 
         super().render(**kwargs)
