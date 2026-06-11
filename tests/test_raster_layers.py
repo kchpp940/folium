@@ -513,3 +513,342 @@ def test_video_overlay_compatibility():
     assert '"loop": false' in html
     # tojavascript 过滤器会自动 camelize
     assert '"extraOption": "value"' in html
+
+
+def test_module_exports():
+    """模块公开接口检查：__all__ 必须只导出四个公共类，不能泄露内部实现。"""
+    import folium.raster_layers as rl
+
+    # __all__ 必须存在且只包含四个公共类
+    assert hasattr(rl, "__all__")
+    assert set(rl.__all__) == {"TileLayer", "WmsTileLayer", "ImageOverlay", "VideoOverlay"}
+
+    # _RasterLayerConfig 必须存在（单下划线，非公开）
+    assert hasattr(rl, "_RasterLayerConfig")
+
+    # 模块 dir 列表不应以公共方式暴露 _RasterLayerConfig（不会出现在 from * 导入中）
+    module_dir_names = [n for n in dir(rl) if not n.startswith("_")]
+    assert "TileLayer" in module_dir_names
+    assert "WmsTileLayer" in module_dir_names
+    assert "ImageOverlay" in module_dir_names
+    assert "VideoOverlay" in module_dir_names
+    # _RasterLayerConfig 不以非下划线形式存在
+    assert "RasterLayerConfig" not in module_dir_names
+
+
+def test_tile_layer_signature():
+    """TileLayer.__init__ 参数顺序和默认值必须精确锁定。"""
+    import inspect
+
+    sig = inspect.signature(folium.raster_layers.TileLayer.__init__)
+    params = list(sig.parameters.keys())
+
+    # 排除 self，检查参数顺序（独立预期值）
+    EXPECTED_PARAMS = [
+        "tiles",
+        "min_zoom",
+        "max_zoom",
+        "max_native_zoom",
+        "attr",
+        "detect_retina",
+        "name",
+        "overlay",
+        "control",
+        "show",
+        "no_wrap",
+        "subdomains",
+        "tms",
+        "opacity",
+        "kwargs",
+    ]
+    assert params[1:] == EXPECTED_PARAMS
+
+    # 检查每个参数的默认值（独立预期值）
+    EXPECTED_DEFAULTS = {
+        "tiles": "OpenStreetMap",
+        "min_zoom": None,
+        "max_zoom": None,
+        "max_native_zoom": None,
+        "attr": None,
+        "detect_retina": False,
+        "name": None,
+        "overlay": False,
+        "control": True,
+        "show": True,
+        "no_wrap": False,
+        "subdomains": "abc",
+        "tms": False,
+        "opacity": 1,
+    }
+    for param_name, expected_default in EXPECTED_DEFAULTS.items():
+        param = sig.parameters[param_name]
+        assert param.default == expected_default, (
+            f"TileLayer.{param_name} 默认值不匹配: "
+            f"期望 {expected_default}, 实际 {param.default}"
+        )
+
+    # kwargs 必须是 VAR_KEYWORD（**kwargs）
+    assert sig.parameters["kwargs"].kind == inspect.Parameter.VAR_KEYWORD
+
+    # kwargs 必须能正确吸收未知参数并进入 self.options
+    tiles_url = "https://example.com/{z}/{x}/{y}.png"
+    layer = folium.raster_layers.TileLayer(
+        tiles=tiles_url,
+        attr="attr",
+        unknown_option_a="value_a",
+        unknown_option_b=42,
+    )
+    # kwargs 吸收的参数进入 self.options，不被 camelize（TileLayer 用 remove_empty）
+    assert "unknown_option_a" in layer.options
+    assert layer.options["unknown_option_a"] == "value_a"
+    assert "unknown_option_b" in layer.options
+    assert layer.options["unknown_option_b"] == 42
+    # 未被吸收的参数（已定义的参数）不应作为 kwargs
+    assert "tiles" not in layer.options
+    assert "attr" not in layer.options  # attr → attribution 后进入 options
+
+
+def test_wms_tile_layer_signature():
+    """WmsTileLayer.__init__ 参数顺序和默认值必须精确锁定。"""
+    import inspect
+
+    sig = inspect.signature(folium.raster_layers.WmsTileLayer.__init__)
+    params = list(sig.parameters.keys())
+
+    EXPECTED_PARAMS = [
+        "url",
+        "layers",
+        "styles",
+        "fmt",
+        "transparent",
+        "version",
+        "attr",
+        "name",
+        "overlay",
+        "control",
+        "show",
+        "kwargs",
+    ]
+    assert params[1:] == EXPECTED_PARAMS
+
+    EXPECTED_DEFAULTS = {
+        "styles": "",
+        "fmt": "image/jpeg",
+        "transparent": False,
+        "version": "1.1.1",
+        "attr": "",
+        "name": None,
+        "overlay": True,
+        "control": True,
+        "show": True,
+    }
+    for param_name, expected_default in EXPECTED_DEFAULTS.items():
+        param = sig.parameters[param_name]
+        assert param.default == expected_default, (
+            f"WmsTileLayer.{param_name} 默认值不匹配: "
+            f"期望 {expected_default}, 实际 {param.default}"
+        )
+
+    # url 和 layers 必须没有默认值（POSITIONAL_OR_KEYWORD）
+    assert sig.parameters["url"].default == inspect.Parameter.empty
+    assert sig.parameters["layers"].default == inspect.Parameter.empty
+
+    # kwargs 必须是 VAR_KEYWORD
+    assert sig.parameters["kwargs"].kind == inspect.Parameter.VAR_KEYWORD
+
+    # kwargs 吸收的参数被 camelize（WMS 用 parse_options）并进入 self.options
+    wms_url = "http://example.com/wms"
+    layer = folium.raster_layers.WmsTileLayer(
+        url=wms_url,
+        layers="test",
+        my_custom_option="value",
+        another_param=123,
+    )
+    # camelize: my_custom_option → myCustomOption
+    assert "myCustomOption" in layer.options
+    assert layer.options["myCustomOption"] == "value"
+    assert "anotherParam" in layer.options
+    assert layer.options["anotherParam"] == 123
+
+
+def test_image_overlay_signature():
+    """ImageOverlay.__init__ 参数顺序和默认值必须精确锁定。"""
+    import inspect
+
+    sig = inspect.signature(folium.raster_layers.ImageOverlay.__init__)
+    params = list(sig.parameters.keys())
+
+    EXPECTED_PARAMS = [
+        "image",
+        "bounds",
+        "origin",
+        "colormap",
+        "mercator_project",
+        "pixelated",
+        "name",
+        "overlay",
+        "control",
+        "show",
+        "kwargs",
+    ]
+    assert params[1:] == EXPECTED_PARAMS
+
+    EXPECTED_DEFAULTS = {
+        "origin": "upper",
+        "colormap": None,
+        "mercator_project": False,
+        "pixelated": True,
+        "name": None,
+        "overlay": True,
+        "control": True,
+        "show": True,
+    }
+    for param_name, expected_default in EXPECTED_DEFAULTS.items():
+        param = sig.parameters[param_name]
+        assert param.default == expected_default, (
+            f"ImageOverlay.{param_name} 默认值不匹配: "
+            f"期望 {expected_default}, 实际 {param.default}"
+        )
+
+    # image 和 bounds 必须没有默认值
+    assert sig.parameters["image"].default == inspect.Parameter.empty
+    assert sig.parameters["bounds"].default == inspect.Parameter.empty
+
+    # kwargs 必须是 VAR_KEYWORD
+    assert sig.parameters["kwargs"].kind == inspect.Parameter.VAR_KEYWORD
+
+    # kwargs 吸收的参数进入 self.options，不被 camelize
+    data = [
+        [[1, 0, 0, 1], [0, 0, 0, 0], [0, 0, 0, 0]],
+        [[1, 1, 0, 0.5], [0, 0, 1, 1], [0, 0, 1, 1]],
+    ]
+    bounds = [[0, -180], [90, 180]]
+    layer = folium.raster_layers.ImageOverlay(
+        image=data,
+        bounds=bounds,
+        mercator_project=True,
+        extra_img_option="my_value",
+        zoom_level=10,
+    )
+    # 不 camelize
+    assert "extra_img_option" in layer.options
+    assert layer.options["extra_img_option"] == "my_value"
+    assert "zoom_level" in layer.options
+    assert layer.options["zoom_level"] == 10
+
+
+def test_video_overlay_signature():
+    """VideoOverlay.__init__ 参数顺序和默认值必须精确锁定。"""
+    import inspect
+
+    sig = inspect.signature(folium.raster_layers.VideoOverlay.__init__)
+    params = list(sig.parameters.keys())
+
+    EXPECTED_PARAMS = [
+        "video_url",
+        "bounds",
+        "autoplay",
+        "loop",
+        "name",
+        "overlay",
+        "control",
+        "show",
+        "kwargs",
+    ]
+    assert params[1:] == EXPECTED_PARAMS
+
+    EXPECTED_DEFAULTS = {
+        "autoplay": True,
+        "loop": True,
+        "name": None,
+        "overlay": True,
+        "control": True,
+        "show": True,
+    }
+    for param_name, expected_default in EXPECTED_DEFAULTS.items():
+        param = sig.parameters[param_name]
+        assert param.default == expected_default, (
+            f"VideoOverlay.{param_name} 默认值不匹配: "
+            f"期望 {expected_default}, 实际 {param.default}"
+        )
+
+    # video_url 和 bounds 必须没有默认值
+    assert sig.parameters["video_url"].default == inspect.Parameter.empty
+    assert sig.parameters["bounds"].default == inspect.Parameter.empty
+
+    # kwargs 必须是 VAR_KEYWORD
+    assert sig.parameters["kwargs"].kind == inspect.Parameter.VAR_KEYWORD
+
+    # kwargs 吸收的参数进入 self.options，不被 camelize
+    video_url = "https://example.com/video.mp4"
+    bounds = [[-45, -90], [45, 90]]
+    layer = folium.raster_layers.VideoOverlay(
+        video_url=video_url,
+        bounds=bounds,
+        extra_video_opt="opt_value",
+        play_back_rate=1.5,
+    )
+    # 不 camelize
+    assert "extra_video_opt" in layer.options
+    assert layer.options["extra_video_opt"] == "opt_value"
+    assert "play_back_rate" in layer.options
+    assert layer.options["play_back_rate"] == 1.5
+    # autoplay 和 loop 进入 self.options（非 kwargs）
+    assert "autoplay" in layer.options
+    assert "loop" in layer.options
+
+
+def test_layer_control_params_passthrough():
+    """父类 Layer 控制参数（name/overlay/control/show）透传行为断言。"""
+    tiles_url = "https://example.com/{z}/{x}/{y}.png"
+    wms_url = "http://example.com/wms"
+    data = [
+        [[1, 0, 0, 1], [0, 0, 0, 0]],
+        [[1, 1, 0, 0.5], [0, 0, 1, 1]],
+    ]
+    img_bounds = [[0, -180], [90, 180]]
+    video_url = "https://example.com/video.mp4"
+    video_bounds = [[-45, -90], [45, 90]]
+
+    TEST_PARAMS = {
+        "name": "custom-layer",
+        "overlay": True,
+        "control": False,
+        "show": False,
+    }
+
+    # TileLayer
+    tl = folium.raster_layers.TileLayer(
+        tiles=tiles_url, attr="attr", **TEST_PARAMS
+    )
+    assert tl.layer_name == "custom-layer"
+    assert tl.overlay is True
+    assert tl.control is False
+    assert tl.show is False
+
+    # WmsTileLayer
+    wms = folium.raster_layers.WmsTileLayer(
+        url=wms_url, layers="test", **TEST_PARAMS
+    )
+    assert wms.layer_name == "custom-layer"
+    assert wms.overlay is True
+    assert wms.control is False
+    assert wms.show is False
+
+    # ImageOverlay
+    img = folium.raster_layers.ImageOverlay(
+        image=data, bounds=img_bounds, mercator_project=True, **TEST_PARAMS
+    )
+    assert img.layer_name == "custom-layer"
+    assert img.overlay is True
+    assert img.control is False
+    assert img.show is False
+
+    # VideoOverlay
+    vid = folium.raster_layers.VideoOverlay(
+        video_url=video_url, bounds=video_bounds, **TEST_PARAMS
+    )
+    assert vid.layer_name == "custom-layer"
+    assert vid.overlay is True
+    assert vid.control is False
+    assert vid.show is False
