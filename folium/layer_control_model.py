@@ -363,27 +363,14 @@ class LayerControlModel:
 
 def collect_excluded_layers(parent) -> set:
     excluded: set = set()
-    has_grouped_or_tree = False
-    from folium.map import Layer as LayerCls
-
     for item in parent._children.values():
-        cls_name = type(item).__name__
-        if cls_name == "GroupedLayerControl":
-            has_grouped_or_tree = True
-            for sublist in item._groups.values():
-                for element in sublist:
-                    if isinstance(element, LayerCls):
-                        excluded.add(element)
-        elif cls_name == "TreeLayerControl":
-            has_grouped_or_tree = True
-            _collect_tree_layers(item._base_tree_raw, excluded)
-            _collect_tree_layers(item._overlay_tree_raw, excluded)
-
-    if has_grouped_or_tree:
-        for item in parent._children.values():
-            if isinstance(item, LayerCls) and getattr(item, "control_group", None):
-                excluded.add(item)
-
+        build_claim = getattr(item, "_build_model_and_claim", None)
+        if callable(build_claim):
+            try:
+                claimed = build_claim(parent)
+                excluded.update(claimed)
+            except Exception:
+                pass
     return excluded
 
 

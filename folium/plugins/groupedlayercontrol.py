@@ -84,10 +84,13 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             OrderedDict()
         )
         self.layers_untoggle: set = set()
+        self._claimed_set_cache: set | None = None
 
-    def render(self, **kwargs):
-        model = LayerControlModel.from_map_children(self._parent)
+    def _build_model_and_claim(self, parent):
+        if self._claimed_set_cache is not None:
+            return self._claimed_set_cache
 
+        model = LayerControlModel.from_map_children(parent)
         model.deduplicate()
         model.sort_by_weight()
 
@@ -99,6 +102,15 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             self.options["exclusiveGroups"] = group_order
 
         self.layers_untoggle = set()
+        js_to_entry = {e.js_name: e for e in model.entries}
+        claimed = set()
+
+        for overlays_dict in self.grouped_overlays.values():
+            for label, js_name in overlays_dict.items():
+                entry = js_to_entry.get(js_name)
+                if entry is not None:
+                    claimed.add(entry.layer)
+
         for entry in model.entries:
             if not entry.is_visible or entry.is_disabled:
                 self.layers_untoggle.add(entry.js_name)
@@ -108,4 +120,9 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
                 for element in sublist[1:]:
                     self.layers_untoggle.add(element.get_name())
 
+        self._claimed_set_cache = claimed
+        return claimed
+
+    def render(self, **kwargs):
+        self._build_model_and_claim(self._parent)
         super().render()

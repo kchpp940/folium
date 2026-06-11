@@ -305,6 +305,100 @@ def test_collect_excluded_layers_function():
     assert fg2 in excluded
 
 
+def test_precise_claim_grouped_does_not_include_base_with_control_group():
+    m = folium.Map()
+    base = FeatureGroup(
+        name="base_with_grp",
+        control=True,
+        show=True,
+        overlay=False,
+        control_group="BaseGrp",
+    )
+    overlay = FeatureGroup(
+        name="plain_overlay", control=True, show=True, overlay=True
+    )
+    base.add_to(m)
+    overlay.add_to(m)
+
+    GroupedLayerControl(groups={}).add_to(m)
+    lc = LayerControl().add_to(m)
+    m._repr_html_()
+
+    assert base.layer_name in lc.base_layers
+    assert overlay.layer_name in lc.overlays
+
+
+def test_precise_claim_grouped_skips_plain_overlay_not_in_groups():
+    m = folium.Map()
+    fg_claimed = FeatureGroup(
+        name="claimed",
+        control=True,
+        show=True,
+        overlay=True,
+        control_group="G",
+    )
+    fg_unclaimed = FeatureGroup(
+        name="unclaimed", control=True, show=True, overlay=True
+    )
+    fg_claimed.add_to(m)
+    fg_unclaimed.add_to(m)
+
+    GroupedLayerControl(groups={}).add_to(m)
+    lc = LayerControl().add_to(m)
+    m._repr_html_()
+
+    assert fg_claimed.layer_name not in lc.overlays
+    assert fg_unclaimed.layer_name in lc.overlays
+
+
+def test_precise_claim_tree_skips_plain_overlay_not_in_tree():
+    m = folium.Map()
+    fg_claimed = FeatureGroup(
+        name="claimed_tree",
+        control=True,
+        show=True,
+        overlay=True,
+        control_group="A/B",
+    )
+    fg_unclaimed = FeatureGroup(
+        name="unclaimed_tree", control=True, show=True, overlay=True
+    )
+    fg_claimed.add_to(m)
+    fg_unclaimed.add_to(m)
+
+    TreeLayerControl().add_to(m)
+    lc = LayerControl().add_to(m)
+    m._repr_html_()
+
+    assert fg_claimed.layer_name not in lc.overlays
+    assert fg_unclaimed.layer_name in lc.overlays
+
+
+def test_precise_claim_mixed_tree_and_grouped():
+    m = folium.Map()
+    fg_g1 = FeatureGroup(
+        name="fg_g1", control=True, show=True, overlay=True, control_group="G1"
+    )
+    fg_t1 = FeatureGroup(
+        name="fg_t1", control=True, show=True, overlay=True, control_group="T1/Sub"
+    )
+    fg_free = FeatureGroup(
+        name="fg_free", control=True, show=True, overlay=True
+    )
+    fg_g1.add_to(m)
+    fg_t1.add_to(m)
+    fg_free.add_to(m)
+
+    GroupedLayerControl(groups={}).add_to(m)
+    TreeLayerControl().add_to(m)
+    lc = LayerControl().add_to(m)
+    m._repr_html_()
+
+    assert fg_g1.layer_name not in lc.overlays
+    assert fg_t1.layer_name not in lc.overlays
+    assert fg_free.layer_name in lc.overlays
+
+
 def test_grouped_order_explicit_then_auto():
     m = folium.Map()
     fg_explicit = FeatureGroup(
