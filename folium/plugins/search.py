@@ -54,13 +54,7 @@ class _RegEntry:
     stable_id: str
     layer_var: str
     kind: str
-    match_key: Optional[str]
-    match_value: Optional[str]
-    feature_index: Optional[int]
     js_var: Optional[str] = None
-
-    def as_dict(self) -> dict:
-        return asdict(self)
 
 
 def _read_property_bag(kind: str, obj: Any, id_field: Optional[str]) -> dict:
@@ -174,7 +168,7 @@ def _serialize_layer(
         for idx, feat in enumerate(features):
             kind = "geojson_feature"
             bag = _read_property_bag(kind, feat, cfg.id_field)
-            sid = _make_stable_id(
+            sid = bag.get("__searchSid") or _make_stable_id(
                 cfg.id_field,
                 bag,
                 f"{cfg.layer_var}_f{idx}",
@@ -183,8 +177,9 @@ def _serialize_layer(
             haystack_parts = _read_field_values(search_fields, bag)
             if not haystack_parts:
                 haystack_parts = [str(v) for v in bag.values() if v is not None]
+            clean_bag = {k: v for k, v in bag.items() if k != "__searchSid"}
             props_for_js = {
-                **bag,
+                **clean_bag,
                 "__displayFields": _read_field_values(display_fields, bag),
             }
             geom = feat.get("geometry")
@@ -202,17 +197,11 @@ def _serialize_layer(
                     source_label=cfg.layer_var,
                 )
             )
-            # Registration: GeoJson sub-layers are the Nth child produced
-            # by eachLayer on the source layer.  We record the feature
-            # index so JS can walk eachLayer and tag the right one.
             regs.append(
                 _RegEntry(
                     stable_id=sid,
                     layer_var=cfg.layer_var,
                     kind="geojson",
-                    match_key=cfg.id_field,
-                    match_value=str(bag[cfg.id_field]) if cfg.id_field and cfg.id_field in bag else None,
-                    feature_index=idx,
                 )
             )
         return entries, regs
@@ -225,7 +214,7 @@ def _serialize_layer(
         for idx, geom in enumerate(geometries):
             kind = "geojson_feature"
             bag = _read_property_bag(kind, geom, cfg.id_field)
-            sid = _make_stable_id(
+            sid = bag.get("__searchSid") or _make_stable_id(
                 cfg.id_field,
                 bag,
                 f"{cfg.layer_var}_g{idx}",
@@ -234,8 +223,9 @@ def _serialize_layer(
             haystack_parts = _read_field_values(search_fields, bag)
             if not haystack_parts:
                 haystack_parts = [str(v) for v in bag.values() if v is not None]
+            clean_bag = {k: v for k, v in bag.items() if k != "__searchSid"}
             props_for_js = {
-                **bag,
+                **clean_bag,
                 "__displayFields": _read_field_values(display_fields, bag),
             }
             entries.append(
@@ -257,9 +247,6 @@ def _serialize_layer(
                     stable_id=sid,
                     layer_var=cfg.layer_var,
                     kind="topojson",
-                    match_key=cfg.id_field,
-                    match_value=str(bag[cfg.id_field]) if cfg.id_field and cfg.id_field in bag else None,
-                    feature_index=idx,
                 )
             )
         return entries, regs
@@ -306,9 +293,6 @@ def _serialize_layer(
                     stable_id=sid,
                     layer_var=cfg.layer_var,
                     kind="marker",
-                    match_key=None,
-                    match_value=None,
-                    feature_index=None,
                     js_var=marker.get_name(),
                 )
             )
@@ -749,10 +733,54 @@ class Search(JSCSSMixin, MacroElement):
         self.search_index: list = []
         self._registration_js: str = ""
 
+        self._inject_feature_sids()
+
         # Back-compat attributes.
         self.layer = self.layer_configs[0].layer if layer is not None else None
         self.search_label = search_label
         self.geom_type = geom_type
+
+    def _inject_feature_sids(self) -> None:
+        """Write ``__searchSid`` into each GeoJson/TopoJson feature's
+        ``properties`` dict so that when the source layer renders, the
+        Leaflet sub-layers carry the stable id in their
+        ``feature.properties``.
+
+        This MUST happen before GeoJson.render() / TopoJson.render() so
+        the injected value is included in the rendered HTML.  Called from
+        ``__init__`` to guarantee ordering regardless of when the Search
+        control is added to the map.
+        """
+        for cfg_idx, cfg in enumerate(self.layer_configs):
+            layer = cfg.layer
+            if isinstance(layer, GeoJson):
+                features = (layer.data or {}).get("features", [])
+                for idx, feat in enumerate(features):
+                    bag = dict(feat.get("properties") or {})
+                    sid = _make_stable_id(
+                        cfg.id_field,
+                        bag,
+                        f"{cfg.layer_var}_f{idx}",
+                        cfg_idx,
+                    )
+                    if "properties" not in feat:
+                        feat["properties"] = {}
+                    feat["properties"]["__searchSid"] = sid
+            elif isinstance(layer, TopoJson):
+                obj_name = layer.object_path.split(".")[-1]
+                topo_objs = (layer.data or {}).get("objects", {}).get(obj_name, {})
+                geometries = topo_objs.get("geometries", [])
+                for idx, geom in enumerate(geometries):
+                    bag = dict(geom.get("properties") or {})
+                    sid = _make_stable_id(
+                        cfg.id_field,
+                        bag,
+                        f"{cfg.layer_var}_g{idx}",
+                        cfg_idx,
+                    )
+                    if "properties" not in geom:
+                        geom["properties"] = {}
+                    geom["properties"]["__searchSid"] = sid
 
     def test_params(self, keys):
         if keys is not None and self.search_label is not None:
@@ -771,33 +799,26 @@ class Search(JSCSSMixin, MacroElement):
         """Generate deterministic JS that writes ``stable_id → real layer``
         into ``window.__searchReg`` for every registered search entry.
 
-        The JS code walks each source layer's eachLayer() exactly once,
-        matching sub-layers by the criteria encoded in _RegEntry:
+        GeoJson/TopoJson: each sub-layer created by L.geoJson carries
+        ``feature.properties.__searchSid`` – injected by
+        ``_inject_feature_sids()`` before the source layer renders.
+        The JS code walks eachLayer and registers by that property.
+        No positional assumptions; works with MultiPoint,
+        GeometryCollection, null geometry or filtered features.
 
-        * GeoJson/TopoJson sub-layers are matched by their ordinal
-          position (``feature_index``) which is the order that
-          L.geoJson.eachLayer yields sub-layers in.
-        * Markers are matched by their Python-assigned ``get_name()``
-          which is the global JS variable name assigned by branca.
-
-        This is fully deterministic – no haystack comparison, no
-        childRef variable-scope guessing.
+        Markers: matched by their global JS variable name (assigned by
+        branca and known at Python render time).
         """
         lines: list[str] = []
 
-        # Group registrations by layer_var so we walk each source layer
-        # once.
         by_layer: dict[str, list[_RegEntry]] = {}
         for r in regs:
             by_layer.setdefault(r.layer_var, []).append(r)
 
         for layer_var, layer_regs in by_layer.items():
-            # Separate marker regs (matched by global variable name)
-            # from geojson/topojson regs (matched by feature_index).
             marker_regs = [r for r in layer_regs if r.kind == "marker"]
             geojson_regs = [r for r in layer_regs if r.kind in ("geojson", "topojson")]
 
-            # --- Register markers by their global JS variable name. ---
             for r in marker_regs:
                 if r.js_var:
                     lines.append(
@@ -806,22 +827,14 @@ class Search(JSCSSMixin, MacroElement):
                         f"{r.js_var}; }}"
                     )
 
-            # --- Register GeoJson/TopoJson sub-layers by feature index. ---
             if geojson_regs:
-                sid_by_idx = {
-                    r.feature_index: r.stable_id for r in geojson_regs
-                }
-                sid_map_json = json.dumps(sid_by_idx)
                 lines.append(
                     f"(function () {{"
                     f"  var src = {layer_var};"
                     f"  if (!src || typeof src.eachLayer !== 'function') return;"
-                    f"  var idx = 0;"
-                    f"  var sidMap = {sid_map_json};"
                     f"  src.eachLayer(function (l) {{"
-                    f"    var sid = sidMap[idx];"
-                    f"    if (sid) window.__searchReg[sid] = l;"
-                    f"    idx++;"
+                    f"    var p = l.feature && l.feature.properties;"
+                    f"    if (p && p.__searchSid) window.__searchReg[p.__searchSid] = l;"
                     f"  }});"
                     f"}})();"
                 )
