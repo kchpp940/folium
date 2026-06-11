@@ -11,6 +11,7 @@ Benefits:
 - Structured metadata: plugin, package, version, kind instead of URL guessing
 - Centralised validation: type check, duplicate names, consistency
 - Cross-plugin audit: global name conflicts, package version skew, URL drift
+- Legacy-name allowlisting for known historical collisions
 - Easier version upgrades, offline packaging and resource coverage
 - Backward compatibility with JSCSSMixin through build_defaults()
 
@@ -70,6 +71,16 @@ class Resource:
         When omitted the list position (insertion order) is used instead.
         Useful when two interdependent plugins must load relative to each
         other even though they live in different files.
+    legacy : bool, default False
+        Flag this resource as having a historically-constrained ``name``
+        that cannot be changed for backward compatibility.  When a
+        cross-plugin name conflict (E001) involves *only* resources
+        flagged ``legacy=True``, the audit demotes it from error to
+        warning (W004) so the conflict remains visible but does not
+        block audits.  Example: ``BoatMarker`` inherits its resource
+        name from an old copy-paste of ``MarkerCluster``; changing the
+        name would break callers who rely on ``add_js_link()`` with
+        that key.
     """
 
     name: str
@@ -80,6 +91,7 @@ class Resource:
     version: Optional[str] = None
     kind: Optional[Literal["plugin", "dependency"]] = None
     order: Optional[int] = None
+    legacy: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +145,13 @@ def validate_resource(r: Resource, *, plugin_hint: Optional[str] = None) -> None
         raise TypeError(
             f"Resource '{r.name}': 'order' must be int or None, got "
             f"{type(r.order).__name__}."
+        )
+
+    # -- legacy flag must be bool -------------------------------------------
+    if not isinstance(r.legacy, bool):
+        raise TypeError(
+            f"Resource '{r.name}': 'legacy' must be bool, got "
+            f"{type(r.legacy).__name__}."
         )
 
 
@@ -412,22 +431,29 @@ def audit_all_resources(
 
     1. **E001 — cross-plugin name collision with different URLs**: the same
        ``name + type`` pair is used by different plugins but with different
-       URLs.  The second plugin to render will silently overwrite the first
-       with a *different* script/stylesheet — a genuine bug.
-    2. **E002 — same package, different versions**: a package name
+       URLs AND *none* of the involved resources is flagged ``legacy=True``.
+       The second plugin to render will silently overwrite the first with a
+       *different* script/stylesheet — a genuine bug.
+    2. **W004 — legacy name collision with different URLs**: same as E001
+       but *at least one* resource in the conflict set is flagged
+       ``legacy=True``.  This demotes the problem from error to warning
+       so audits remain actionable on real regressions while explicitly
+       allowlisted historical names are tolerated for backward
+       compatibility.
+    3. **E002 — same package, different versions**: a package name
        appears with two different ``version`` strings.  This is almost
        always a bug (e.g. one plugin pins ``moment@2.18.1`` while
        another pins ``moment@2.29.0``).
-    3. **W001 — same URL, different names**: the same ``type + URL``
+    4. **W001 — same URL, different names**: the same ``type + URL``
        pair is declared under two different ``name`` values.  This is
        legal but suspicious — it usually means two plugins embed the
        same library independently, and the duplicate will be loaded
        twice if both plugins are active.
-    4. **W002 — name collision across types**: a ``name`` appears as
+    5. **W002 — name collision across types**: a ``name`` appears as
        both ``js`` and ``css`` in different plugins.  Not necessarily
        broken, but can confuse ``add_js_link`` / ``add_css_link``
        overrides.
-    5. **W003 — shared resource name (same URL)**: the same ``name +
+    6. **W003 — shared resource name (same URL)**: the same ``name +
        type`` pair is used by multiple plugins *with the same URL*.
        This is safe — JSCSSMixin deduplicates by name — but the
        shared name should be documented so maintainers know why.
@@ -476,19 +502,48 @@ def audit_all_resources(
             continue
         urls = name_type_to_urls[(name, rtype)]
         if len(urls) > 1:
-            issues.append(
-                AuditIssue(
-                    severity="error",
-                    code="E001",
-                    message=(
-                        f"Resource name {name!r} (type={rtype!r}) is declared "
-                        f"by multiple plugins {plugins} with DIFFERENT URLs "
-                        f"{sorted(urls)}.  The second plugin to render will "
-                        f"silently overwrite the first with a different script."
-                    ),
-                    details={"name": name, "type": rtype, "plugins": plugins, "urls": sorted(urls)},
+            entries = name_type_to_entries[(name, rtype)]
+            any_legacy = any(r.legacy for _, r in entries)
+            if any_legacy:
+                issues.append(
+                    AuditIssue(
+                        severity="warning",
+                        code="W004",
+                        message=(
+                            f"Resource name {name!r} (type={rtype!r}) is "
+                            f"declared by multiple plugins {plugins} with "
+                            f"DIFFERENT URLs {sorted(urls)}.  At least one "
+                            f"participating resource is flagged legacy=True, "
+                            f"so this collision is tolerated for backward "
+                            f"compatibility.  Remove all legacy flags to "
+                            f"re-promote to an error."
+                        ),
+                        details={
+                            "name": name, "type": rtype,
+                            "plugins": plugins,
+                            "urls": sorted(urls),
+                        },
+                    )
                 )
-            )
+            else:
+                issues.append(
+                    AuditIssue(
+                        severity="error",
+                        code="E001",
+                        message=(
+                            f"Resource name {name!r} (type={rtype!r}) is "
+                            f"declared by multiple plugins {plugins} with "
+                            f"DIFFERENT URLs {sorted(urls)}.  The second "
+                            f"plugin to render will silently overwrite the "
+                            f"first with a different script."
+                        ),
+                        details={
+                            "name": name, "type": rtype,
+                            "plugins": plugins,
+                            "urls": sorted(urls),
+                        },
+                    )
+                )
         else:
             issues.append(
                 AuditIssue(

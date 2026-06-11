@@ -87,6 +87,16 @@ class TestValidateResource:
         with pytest.raises(TypeError, match="must be str"):
             validate_resource(Resource(name=123, url="http://x", type="js"))
 
+    def test_legacy_not_bool(self):
+        with pytest.raises(TypeError, match="'legacy' must be bool"):
+            r = Resource(name="a", url="http://x", type="js")
+            object.__setattr__(r, "legacy", "yes")  # bypass frozen
+            validate_resource(r)
+
+    def test_legacy_default_false(self):
+        r = Resource(name="a", url="http://x", type="js")
+        assert r.legacy is False
+
 
 class TestValidateResourceList:
     def test_duplicate_name(self):
@@ -257,6 +267,31 @@ class TestAuditAllResources:
         assert len(w003) == 1
         assert w003[0].severity == "warning"
         assert "moment" in w003[0].message
+
+    def test_w004_legacy_demotes_name_collision_to_warning(self):
+        registry = {
+            "PluginA": [Resource(name="same", url="http://one", type="js")],
+            "PluginB": [Resource(name="same", url="http://two", type="js", legacy=True)],
+        }
+        issues = audit_all_resources(registry)
+        e001 = [i for i in issues if i.code == "E001"]
+        w004 = [i for i in issues if i.code == "W004"]
+        assert e001 == [], "Presence of legacy flag should demote E001 → W004"
+        assert len(w004) == 1
+        assert w004[0].severity == "warning"
+        assert "legacy" in w004[0].message
+
+    def test_e001_persists_without_legacy(self):
+        registry = {
+            "PluginA": [Resource(name="same", url="http://one", type="js")],
+            "PluginB": [Resource(name="same", url="http://two", type="js")],
+        }
+        issues = audit_all_resources(registry)
+        e001 = [i for i in issues if i.code == "E001"]
+        w004 = [i for i in issues if i.code == "W004"]
+        assert len(e001) == 1
+        assert e001[0].severity == "error"
+        assert w004 == []
 
     def test_no_issues(self):
         registry = {

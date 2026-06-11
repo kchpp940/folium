@@ -45,13 +45,14 @@ class BoatMarker(JSCSSMixin, Marker):
 
     resources = [
         Resource(
-            name="boatmarkerjs",
+            name="markerclusterjs",
             url="https://unpkg.com/leaflet.boatmarker/leaflet.boatmarker.min.js",
             type="js",
             plugin="BoatMarker",
             package="leaflet.boatmarker",
             version=None,
             kind="plugin",
+            legacy=True,
         ),
     ]
     default_js, default_css = build_defaults(resources)
