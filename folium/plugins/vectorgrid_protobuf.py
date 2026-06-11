@@ -31,6 +31,14 @@ class VectorGridProtobuf(JSCSSMixin, Layer):
         Whether the layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`folium.map.Layer`.
+    control_group : str or list of str, default None
+        See :class:`folium.map.Layer`.
+    control_disabled : bool, default False
+        See :class:`folium.map.Layer`.
+    control_collapsed : bool, default False
+        See :class:`folium.map.Layer`.
 
     Examples
     --------
@@ -129,8 +137,17 @@ class VectorGridProtobuf(JSCSSMixin, Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "VectorGridProtobuf"
         self.url = url
         if options is not None:

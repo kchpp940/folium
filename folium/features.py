@@ -492,6 +492,14 @@ class GeoJson(Layer):
         Whether the Layer will be included in LayerControls
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`folium.map.Layer`.
+    control_group : str or list of str, default None
+        See :class:`folium.map.Layer`.
+    control_disabled : bool, default False
+        See :class:`folium.map.Layer`.
+    control_collapsed : bool, default False
+        See :class:`folium.map.Layer`.
     smooth_factor: float, default None
         How much to simplify the polyline on each zoom level. More means
         better performance and smoother look, and less means more accurate
@@ -678,6 +686,10 @@ class GeoJson(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
         smooth_factor: Optional[float] = None,
         tooltip: Union[str, Tooltip, "GeoJsonTooltip", None] = None,
         embed: bool = True,
@@ -687,7 +699,12 @@ class GeoJson(Layer):
         marker: Union[Circle, CircleMarker, Marker, None] = None,
         **kwargs: Any,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "GeoJson"
         self.embed = embed
         self.embed_link: Optional[str] = None
@@ -949,6 +966,14 @@ class TopoJson(JSCSSMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`folium.map.Layer`.
+    control_group : str or list of str, default None
+        See :class:`folium.map.Layer`.
+    control_disabled : bool, default False
+        See :class:`folium.map.Layer`.
+    control_collapsed : bool, default False
+        See :class:`folium.map.Layer`.
     smooth_factor: float, default None
         How much to simplify the polyline on each zoom level. More means
         better performance and smoother look, and less means more accurate
@@ -1014,10 +1039,19 @@ class TopoJson(JSCSSMixin, Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
         smooth_factor: Optional[float] = None,
         tooltip: Union[str, Tooltip, None] = None,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "TopoJson"
 
         if "read" in dir(data):
@@ -1475,6 +1509,14 @@ class Choropleth(FeatureGroup):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`folium.map.Layer`.
+    control_group : str or list of str, default None
+        See :class:`folium.map.Layer`.
+    control_disabled : bool, default False
+        See :class:`folium.map.Layer`.
+    control_collapsed : bool, default False
+        See :class:`folium.map.Layer`.
 
     Returns
     -------
@@ -1522,13 +1564,22 @@ class Choropleth(FeatureGroup):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
         topojson: Optional[str] = None,
         smooth_factor: Optional[float] = None,
         highlight: bool = False,
         use_jenks: bool = False,
         **kwargs,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "Choropleth"
 
         fill_color = fill_color or ("blue" if data is None else "Blues")

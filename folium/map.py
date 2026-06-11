@@ -111,6 +111,24 @@ class Layer(Evented):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        The sort order of the layer within the LayerControl.
+        Layers with smaller values appear first. Layers with None use
+        the order in which they were added to the map.
+    control_group : str or list of str, default None
+        The group name(s) for organizing the layer in controls like
+        GroupedLayerControl or TreeLayerControl.
+        - For a single group: pass a string, e.g. `"POIs"`.
+        - For nested/multi-level groups: pass a list, e.g.
+          `["Europe", "France", "Paris"]`.
+        If None, the layer is not grouped (flat list).
+    control_disabled : bool, default False
+        If True, the layer entry is shown in the control but disabled
+        (greyed out, not toggleable by the user).
+    control_collapsed : bool, default False
+        If True and this layer is used as a group/branch node in
+        GroupedLayerControl or TreeLayerControl, that node will be
+        rendered collapsed (closed) by default.
     """
 
     def __init__(
@@ -119,12 +137,23 @@ class Layer(Evented):
         overlay: bool = False,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
     ):
         super().__init__()
         self.layer_name = name if name is not None else self.get_name()
         self.overlay = overlay
         self.control = control
         self.show = show
+        self.control_order = control_order
+        if isinstance(control_group, str):
+            self.control_group: Optional[list[str]] = [control_group]
+        else:
+            self.control_group = control_group
+        self.control_disabled = control_disabled
+        self.control_collapsed = control_collapsed
 
     def render(self, **kwargs):
         if self.show:
@@ -157,6 +186,14 @@ class FeatureGroup(Layer):
         Whether the layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`Layer`.
+    control_group : str or list of str, default None
+        See :class:`Layer`.
+    control_disabled : bool, default False
+        See :class:`Layer`.
+    control_collapsed : bool, default False
+        See :class:`Layer`.
     **kwargs
         Additional (possibly inherited) options. See
         https://leafletjs.com/reference.html#featuregroup
@@ -177,9 +214,18 @@ class FeatureGroup(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "FeatureGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
@@ -208,6 +254,14 @@ class LayerGroup(Layer):
         Whether the layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    control_order : int or float, default None
+        See :class:`Layer`.
+    control_group : str or list of str, default None
+        See :class:`Layer`.
+    control_disabled : bool, default False
+        See :class:`Layer`.
+    control_collapsed : bool, default False
+        See :class:`Layer`.
     **kwargs
         Additional (possibly inherited) options. See
         https://leafletjs.com/reference.html#layergroup
@@ -228,9 +282,18 @@ class LayerGroup(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        control_order: Optional[Union[int, float]] = None,
+        control_group: Optional[Union[str, list[str]]] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show,
+            control_order=control_order, control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "LayerGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
@@ -263,6 +326,11 @@ class LayerControl(MacroElement):
     draggable: bool, default False
           By default the layer control has a fixed position. Set this argument
           to True to allow dragging the control around.
+    sortLayers : bool, default True
+          If True, layers are sorted using their ``control_order`` attribute
+          (with insertion order as a tie-breaker).  If False, the original
+          order of addition to the map is preserved (still grouped by base /
+          overlay).
     **kwargs
         Additional (possibly inherited) options. See
         https://leafletjs.com/reference.html#control-layers
@@ -289,6 +357,21 @@ class LayerControl(MacroElement):
                 {{ this.options|tojavascript }}
             ).addTo({{this._parent.get_name()}});
 
+            {%- if this.disabled_layers %}
+            (function (ctl) {
+                var container = ctl.getContainer();
+                var inputs = container.querySelectorAll('input');
+                var labels = container.querySelectorAll('label');
+                var disabled = {{ this.disabled_layers|tojson }};
+                inputs.forEach(function (inp, i) {
+                    if (disabled.indexOf(inp.nextSibling.textContent.trim()) !== -1) {
+                        inp.disabled = true;
+                        if (labels[i]) labels[i].style.opacity = '0.5';
+                    }
+                });
+            })({{ this.get_name() }});
+            {%- endif %}
+
             {%- if this.draggable %}
             new L.Draggable({{ this.get_name() }}.getContainer()).enable();
             {%- endif %}
@@ -302,32 +385,53 @@ class LayerControl(MacroElement):
         collapsed: bool = True,
         autoZIndex: bool = True,
         draggable: bool = False,
+        sortLayers: bool = True,
         **kwargs: TypeJsonValue,
     ):
         super().__init__()
         self._name = "LayerControl"
         self.options = remove_empty(
-            position=position, collapsed=collapsed, autoZIndex=autoZIndex, **kwargs
+            position=position, collapsed=collapsed, autoZIndex=autoZIndex,
+            sortLayers=sortLayers, **kwargs,
         )
         self.draggable = draggable
+        self.sort_layers = sortLayers
         self.base_layers: OrderedDict[str, str] = OrderedDict()
         self.overlays: OrderedDict[str, str] = OrderedDict()
+        self.disabled_layers: list[str] = []
 
     def reset(self) -> None:
         self.base_layers = OrderedDict()
         self.overlays = OrderedDict()
+        self.disabled_layers = []
 
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
+        from folium.layer_control_utils import flat_layers_for_control
+
         self.reset()
-        for item in self._parent._children.values():
-            if not isinstance(item, Layer) or not item.control:
-                continue
-            key = item.layer_name
-            if not item.overlay:
-                self.base_layers[key] = item.get_name()
-            else:
-                self.overlays[key] = item.get_name()
+        if self.sort_layers:
+            base_list = flat_layers_for_control(
+                self._parent, only_overlay=False, dedupe_names=True
+            )
+            overlay_list = flat_layers_for_control(
+                self._parent, only_overlay=True, dedupe_names=True
+            )
+        else:
+            from folium.layer_control_utils import collect_layers, deduplicate_layer_names
+            base_list = collect_layers(self._parent, only_overlay=False)
+            overlay_list = collect_layers(self._parent, only_overlay=True)
+            deduplicate_layer_names(base_list)
+            deduplicate_layer_names(overlay_list)
+
+        for layer in base_list:
+            self.base_layers[layer.layer_name] = layer.get_name()
+            if layer.control_disabled:
+                self.disabled_layers.append(layer.layer_name)
+        for layer in overlay_list:
+            self.overlays[layer.layer_name] = layer.get_name()
+            if layer.control_disabled:
+                self.disabled_layers.append(layer.layer_name)
         super().render()
 
 

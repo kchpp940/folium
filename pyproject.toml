@@ -17,9 +17,6 @@ dynamic = [
 ]
 requires-python = ">=3.9"
 
-[project.scripts]
-folium-resource = "folium.cli:main"
-
 [tool.interrogate]
 ignore-init-method = true
 ignore-init-module = false
@@ -44,9 +41,6 @@ lint.select = [
 ]
 target-version = "py39"
 line-length = 120
-
-[tool.pytest.ini_options]
-markers = ["network: marks tests that require network connectivity"]
 
 [lint.per-file-ignores]
 "docs/conf.py" = ["E402"]
