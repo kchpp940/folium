@@ -166,14 +166,14 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
     def render(self, **kwargs):
         model = LayerControlModel.from_map_children(self._parent)
 
+        model.deduplicate()
+        model.sort_by_weight()
+
         self.base_tree = model.normalize_tree(
             self._base_tree_raw, is_overlay=False
         )
         self.overlay_tree = model.normalize_tree(
             self._overlay_tree_raw, is_overlay=True
         )
-
-        model.deduplicate()
-        model.sort_by_weight()
 
         super().render()

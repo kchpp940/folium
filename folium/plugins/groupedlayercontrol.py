@@ -16,7 +16,11 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
     ----------
     groups : dict
         A dictionary where the keys are group names and the values are lists
-        of layer objects. For example::
+        of layer objects. Layers in these lists take the given group name
+        as an override. If a layer's ``control_group`` attribute already
+        matches the top-level group name, you can omit it from ``groups``
+        entirely — the control will automatically group them by the
+        ``control_group`` first path segment. Example::
 
             {
                 "Group 1": [layer1, layer2],
@@ -80,22 +84,19 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             OrderedDict()
         )
         self.layers_untoggle: set = set()
-        for sublist in groups.values():
-            for element in sublist:
-                element.control = False
 
     def render(self, **kwargs):
         model = LayerControlModel.from_map_children(self._parent)
 
-        for sublist in self._groups.values():
-            for element in sublist:
-                model.ensure_layer(element)
-
-        model.apply_group_overrides(self._groups)
         model.deduplicate()
         model.sort_by_weight()
 
-        self.grouped_overlays = model.as_grouped_dicts()
+        self.grouped_overlays, group_order = model.as_grouped_dicts(
+            explicit_groups=self._groups,
+            exclusive_groups=self._exclusive_groups,
+        )
+        if self._exclusive_groups:
+            self.options["exclusiveGroups"] = group_order
 
         self.layers_untoggle = set()
         for entry in model.entries:
