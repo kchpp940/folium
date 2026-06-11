@@ -70,6 +70,11 @@ setup(
     extras_require={"testing": ["pytest"]},
     install_requires=install_requires,
     zip_safe=False,
+    entry_points={
+        "console_scripts": [
+            "folium-resource=folium.cli:main",
+        ],
+    },
     use_scm_version={
         "write_to": "folium/_version.py",
         "write_to_template": '__version__ = "{version}"',
