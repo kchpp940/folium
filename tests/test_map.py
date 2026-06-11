@@ -290,3 +290,86 @@ def test_icon_invalid_marker_colors():
     pytest.warns(UserWarning, Icon, color="lila")
     pytest.warns(UserWarning, Icon, color=42)
     pytest.warns(UserWarning, Icon, color=None)
+
+
+# --- Layer control semantics (disabled / collapsed / ordering) ---
+
+
+def test_layer_control_disabled_uses_layers_index():
+    """LayerControl should use _layers array indexing + _folium meta, not
+    querySelector text matching, to disable entries."""
+    m = Map(tiles=None)
+    TileLayer(name="OpenStreetMap", tiles="OpenStreetMap",
+              overlay=False, attr="© OpenStreetMap").add_to(m)
+    fg_a = GeoJson({}, name="Markers",
+                   control_disabled=True).add_to(m)
+    fg_b = GeoJson({}, name="Boundaries").add_to(m)
+
+    LayerControl().add_to(m)
+    out = m._parent.render()
+
+    # New _layers-based approach present
+    assert "ctl._layers.forEach" in out
+    # _folium meta attribute injected
+    assert fg_a.get_name() + "._folium" in out
+    # Old text-matching approach must be gone
+    assert "disabled.indexOf(" not in out
+    assert ".innerText" not in out
+    # sortLayers disabled in JS
+    assert '"sortLayers": false' in out or "sortLayers: false" in out
+
+
+def test_layer_control_collapsed_overrides_option():
+    """If any layer has control_collapsed=True, the entire panel must start
+    collapsed, overriding even LayerControl(collapsed=False)."""
+    # 1. No collapsed layers + explicit collapsed=False -> panel open
+    m1 = Map(tiles=None)
+    TileLayer(name="OSM", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m1)
+    GeoJson({}, name="A").add_to(m1)
+    lc1 = LayerControl(collapsed=False).add_to(m1)
+    lc1.render()
+    assert lc1.options["collapsed"] is False
+
+    # 2. Explicit collapsed=False BUT one layer has control_collapsed -> True
+    m2 = Map(tiles=None)
+    TileLayer(name="OSM", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m2)
+    GeoJson({}, name="A", control_collapsed=True).add_to(m2)
+    lc2 = LayerControl(collapsed=False).add_to(m2)
+    lc2.render()
+    assert lc2.options["collapsed"] is True
+    # Also verify the full HTML render actually emits collapsed: true
+    out2 = m2._parent.render()
+    assert '"collapsed": true' in out2 or "collapsed: true" in out2
+
+    # 3. Default (collapsed=True) + no collapsed layers -> stays True
+    m3 = Map(tiles=None)
+    TileLayer(name="OSM", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m3)
+    GeoJson({}, name="B").add_to(m3)
+    lc3 = LayerControl().add_to(m3)
+    lc3.render()
+    assert lc3.options["collapsed"] is True
+
+
+def test_layer_control_same_label_base_overlay_no_confusion():
+    """A base layer and an overlay sharing the same label must not be
+    accidentally cross-disabled by the text-matching-less implementation."""
+    m = Map(tiles=None)
+    # Base layer called "World" (NOT disabled)
+    TileLayer(name="World", tiles="OpenStreetMap",
+              overlay=False, attr="© OSM").add_to(m)
+    # Overlay called "World" (disabled)
+    GeoJson({}, name="World", overlay=True,
+            control_disabled=True).add_to(m)
+
+    LayerControl().add_to(m)
+    out = m._parent.render()
+
+    # The overlay (second entry in the overall _layers list) must have
+    # controlDisabled=true; the base must not.
+    assert "controlDisabled: true" in out
+    assert "controlDisabled: false" in out
+    # Two distinct _folium blocks for the two layers
+    assert out.count("_folium = {") >= 2

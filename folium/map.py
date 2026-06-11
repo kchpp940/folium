@@ -319,7 +319,11 @@ class LayerControl(MacroElement):
           default: 'topright'
     collapsed : bool, default True
           If true the control will be collapsed into an icon and expanded on
-          mouse hover or touch.
+          mouse hover or touch.  If any participating layer sets its
+          ``control_collapsed`` attribute to True, this value is overridden
+          to True regardless of the argument passed here (so that the
+          ``control_collapsed`` layer-level API has a consistent effect
+          across all three layer controls).
     autoZIndex : bool, default True
           If true the control assigns zIndexes in increasing order to all of
           its layers so that the order is preserved when switching them on/off.
@@ -455,14 +459,28 @@ class LayerControl(MacroElement):
         self._base_layer_objs = base_list
         self._overlay_layer_objs = overlay_list
 
+        any_collapsed = False
         for layer in base_list:
             self.base_layers[layer.layer_name] = layer.get_name()
             if layer.control_disabled:
                 self._has_disabled = True
+            if layer.control_collapsed:
+                any_collapsed = True
         for layer in overlay_list:
             self.overlays[layer.layer_name] = layer.get_name()
             if layer.control_disabled:
                 self._has_disabled = True
+            if layer.control_collapsed:
+                any_collapsed = True
+
+        # Unified control_collapsed semantics for the plain LayerControl:
+        # if any participating layer sets control_collapsed=True, the entire
+        # control panel starts collapsed.  This mirrors GroupedLayerControl
+        # and TreeLayerControl where control_collapsed collapses the node
+        # containing the layer.
+        if any_collapsed:
+            self.options["collapsed"] = True
+
         super().render()
 
 
