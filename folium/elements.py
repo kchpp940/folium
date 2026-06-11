@@ -14,6 +14,10 @@ from branca.element import (
 )
 from jinja2 import Template as JinjaTemplate
 
+from folium.resource_manifest import (
+    find_manifest_for_element,
+    resolve_from_manifest,
+)
 from folium.template import Template
 from folium.utilities import (
     ResourceConfig,
@@ -90,12 +94,13 @@ def _resolve_resource(
     url: str,
     config: ResourceConfig,
     resource_type: str,
+    element: Optional[MacroElement] = None,
 ) -> tuple[type, str, dict]:
     """Resolve a resource to the appropriate Link class and parameters.
 
     This is the single unified entry point for all resource resolution.
-    It handles overrides, CDN, inline, and local modes, as well as
-    fallback and error reporting.
+    It handles overrides, CDN, inline, local, and manifest modes, as well
+    as fallback and error reporting.
 
     Parameters
     ----------
@@ -111,6 +116,51 @@ def _resolve_resource(
     is_css = resource_type == "css"
     RemoteLinkCls = CssLink if is_css else JavascriptLink
     InlineLinkCls = InlineCssLink if is_css else InlineJavascriptLink
+
+    # manifest mode: try to resolve from manifest first, always offline
+    # Note: the manifest also has a "local_path" that may differ from
+    # config.local_path, so we pass both to resolve_from_manifest.
+    if config.mode == ResourceMode.MANIFEST:
+        manifest = find_manifest_for_element(
+            element,
+            manifest_path=config.manifest_path,
+            manifest_obj=config.manifest,
+        )
+        if manifest is None:
+            raise RuntimeError(
+                f"resource_mode='manifest' but no manifest loaded for {name!r}. "
+                "Use set_resource_mode('manifest', manifest_path='...') or "
+                "attach a ResourceConfig with manifest_path= or manifest=."
+            )
+        # Also accept config.local_path as an override for the manifest dir
+        if config.local_path:
+            resolved_dir = config.local_path
+        elif manifest.local_path:
+            resolved_dir = manifest.local_path
+        elif config.manifest_path:
+            resolved_dir = os.path.dirname(os.path.abspath(config.manifest_path))
+        else:
+            resolved_dir = "."
+        path = resolve_from_manifest(name, manifest, resolved_dir)
+        if path is not None:
+            try:
+                content = _read_local_file(path)
+                return InlineLinkCls, "", {"content": content}
+            except OSError as exc:
+                raise RuntimeError(
+                    f"manifest mode: cannot read {name!r} at {path!r}: {exc}"
+                ) from exc
+        # Manifest mode is STRICT offline — do NOT fall back to CDN
+        entry = manifest.get(name)
+        if entry is None:
+            raise RuntimeError(
+                f"manifest mode: resource {name!r} is not listed in the manifest. "
+                "Re-run collect_resources() and download_manifest()."
+            )
+        raise RuntimeError(
+            f"manifest mode: file for {name!r} ({entry.filename}) not found in "
+            f"{resolved_dir!r}. Re-run download_manifest()."
+        )
 
     override = config.get_override(name)
     if override is not None:
@@ -233,14 +283,14 @@ class JSCSSMixin(MacroElement):
 
         for name, url in self.default_js:
             link_cls, resolved_url, link_kwargs = _resolve_resource(
-                name, url, config, "js"
+                name, url, config, "js", element=self
             )
             js_link = link_cls(resolved_url, **link_kwargs)
             figure.header.add_child(js_link, name=name)
 
         for name, url in self.default_css:
             link_cls, resolved_url, link_kwargs = _resolve_resource(
-                name, url, config, "css"
+                name, url, config, "css", element=self
             )
             css_link = link_cls(resolved_url, **link_kwargs)
             figure.header.add_child(css_link, name=name)

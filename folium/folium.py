@@ -310,6 +310,8 @@ class Map(JSCSSMixin, Evented):
         font_size: str = "1rem",
         resource_mode: Optional[str] = None,
         local_path: Optional[str] = None,
+        manifest_path: Optional[str] = None,
+        manifest: Optional[object] = None,
         **kwargs: TypeJsonValue,
     ):
         super().__init__()
@@ -326,11 +328,13 @@ class Map(JSCSSMixin, Evented):
 
         Figure().add_child(self)
 
-        if resource_mode is not None or local_path is not None:
+        if any(x is not None for x in (resource_mode, local_path, manifest_path, manifest)):
             effective_mode = resource_mode or "cdn"
             self._parent._folium_resource_config = ResourceConfig(
                 mode=effective_mode,
                 local_path=local_path,
+                manifest_path=manifest_path,
+                manifest=manifest,
             )
 
         # Map Size Parameters.

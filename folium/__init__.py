@@ -42,6 +42,12 @@ from folium.map import (
     Tooltip,
 )
 from folium.raster_layers import TileLayer, WmsTileLayer
+from folium.resource_manifest import (
+    ResourceEntry,
+    ResourceManifest,
+    collect_resources,
+    download_manifest,
+)
 from folium.utilities import (
     JsCode,
     ResourceConfig,
@@ -108,6 +114,8 @@ __all__ = [
     "Popup",
     "RegularPolygonMarker",
     "ResourceConfig",
+    "ResourceEntry",
+    "ResourceManifest",
     "ResourceMode",
     "StepColormap",
     "TileLayer",
@@ -118,6 +126,8 @@ __all__ = [
     "WmsTileLayer",
     # Resource management
     "clear_resource_overrides",
+    "collect_resources",
+    "download_manifest",
     "get_local_path",
     "get_resource_mode",
     "get_resource_override",

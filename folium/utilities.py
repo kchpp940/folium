@@ -461,13 +461,20 @@ class ResourceMode:
     CDN = "cdn"
     INLINE = "inline"
     LOCAL = "local"
+    MANIFEST = "manifest"
 
 
-_VALID_RESOURCE_MODES = {ResourceMode.CDN, ResourceMode.INLINE, ResourceMode.LOCAL}
+_VALID_RESOURCE_MODES = {
+    ResourceMode.CDN,
+    ResourceMode.INLINE,
+    ResourceMode.LOCAL,
+    ResourceMode.MANIFEST,
+}
 
 _global_resource_mode: str = ResourceMode.CDN
 _global_local_path: Optional[str] = None
 _global_resource_overrides: dict[str, str] = {}
+_global_manifest_path: Optional[str] = None
 
 
 class ResourceConfig:
@@ -475,15 +482,21 @@ class ResourceConfig:
 
     This is the single source of truth for resource loading strategy.
     Resolution order: per-resource overrides → mode-specific behaviour → fallback.
+
+    ``mode="manifest"`` requires either ``manifest_path`` or ``manifest`` to
+    be set.  In manifest mode resources are *only* loaded from files listed
+    in the manifest (no network access at render time).
     """
 
-    __slots__ = ("mode", "local_path", "overrides")
+    __slots__ = ("mode", "local_path", "overrides", "manifest_path", "manifest")
 
     def __init__(
         self,
         mode: str = ResourceMode.CDN,
         local_path: Optional[str] = None,
         overrides: Optional[dict[str, str]] = None,
+        manifest_path: Optional[str] = None,
+        manifest: Optional[object] = None,
     ):
         if mode not in _VALID_RESOURCE_MODES:
             raise ValueError(
@@ -494,9 +507,16 @@ class ResourceConfig:
             raise ValueError(
                 "resource_mode='local' requires local_path to be specified"
             )
+        if mode == ResourceMode.MANIFEST and manifest_path is None and manifest is None:
+            raise ValueError(
+                "resource_mode='manifest' requires either manifest_path "
+                "or manifest to be set"
+            )
         self.mode = mode
         self.local_path = local_path
         self.overrides = dict(overrides) if overrides else {}
+        self.manifest_path = manifest_path
+        self.manifest = manifest
 
     def get_override(self, name: str) -> Optional[str]:
         return self.overrides.get(name)
@@ -507,12 +527,17 @@ class ResourceConfig:
             mode=_global_resource_mode,
             local_path=_global_local_path,
             overrides=_global_resource_overrides,
+            manifest_path=_global_manifest_path,
         )
 
     def with_overrides(self, extra_overrides: dict[str, str]) -> "ResourceConfig":
         merged = {**self.overrides, **extra_overrides}
         return ResourceConfig(
-            mode=self.mode, local_path=self.local_path, overrides=merged
+            mode=self.mode,
+            local_path=self.local_path,
+            overrides=merged,
+            manifest_path=self.manifest_path,
+            manifest=self.manifest,
         )
 
 
@@ -520,8 +545,12 @@ def get_resource_mode() -> str:
     return _global_resource_mode
 
 
-def set_resource_mode(mode: str, local_path: Optional[str] = None) -> None:
-    global _global_resource_mode, _global_local_path
+def set_resource_mode(
+    mode: str,
+    local_path: Optional[str] = None,
+    manifest_path: Optional[str] = None,
+) -> None:
+    global _global_resource_mode, _global_local_path, _global_manifest_path
     if mode not in _VALID_RESOURCE_MODES:
         raise ValueError(
             f"Invalid resource_mode '{mode}'. "
@@ -531,8 +560,14 @@ def set_resource_mode(mode: str, local_path: Optional[str] = None) -> None:
         raise ValueError(
             "resource_mode='local' requires local_path to be specified"
         )
+    if mode == ResourceMode.MANIFEST and manifest_path is None and local_path is None:
+        raise ValueError(
+            "resource_mode='manifest' requires either manifest_path "
+            "(recommended) or local_path (to find manifest.json in-situ)"
+        )
     _global_resource_mode = mode
     _global_local_path = local_path
+    _global_manifest_path = manifest_path
 
 
 def get_local_path() -> Optional[str]:
