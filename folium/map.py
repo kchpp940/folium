@@ -365,9 +365,10 @@ class LayerControl(MacroElement):
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
         self.reset()
-        from folium.layer_control_model import LayerControlModel
+        from folium.layer_control_model import LayerControlModel, collect_excluded_layers
 
-        model = LayerControlModel.from_map_children(self._parent)
+        exclude = collect_excluded_layers(self._parent)
+        model = LayerControlModel.from_map_children(self._parent, exclude=exclude)
         model.deduplicate()
         model.sort_by_weight()
         self.base_layers, self.overlays = model.as_flat_dicts()

@@ -38,12 +38,15 @@ class LayerControlModel:
         self.entries: list[LayerEntry] = []
 
     @classmethod
-    def from_map_children(cls, parent) -> LayerControlModel:
+    def from_map_children(cls, parent, exclude=None) -> LayerControlModel:
         model = cls()
         from folium.map import Layer as LayerCls
 
+        exclude_set = set(exclude) if exclude else set()
         for item in parent._children.values():
             if not isinstance(item, LayerCls) or not item.control:
+                continue
+            if item in exclude_set:
                 continue
             model.add_layer(item)
         return model
@@ -356,3 +359,45 @@ class LayerControlModel:
                 for child in result["children"]
             ]
         return result
+
+
+def collect_excluded_layers(parent) -> set:
+    excluded: set = set()
+    has_grouped_or_tree = False
+    from folium.map import Layer as LayerCls
+
+    for item in parent._children.values():
+        cls_name = type(item).__name__
+        if cls_name == "GroupedLayerControl":
+            has_grouped_or_tree = True
+            for sublist in item._groups.values():
+                for element in sublist:
+                    if isinstance(element, LayerCls):
+                        excluded.add(element)
+        elif cls_name == "TreeLayerControl":
+            has_grouped_or_tree = True
+            _collect_tree_layers(item._base_tree_raw, excluded)
+            _collect_tree_layers(item._overlay_tree_raw, excluded)
+
+    if has_grouped_or_tree:
+        for item in parent._children.values():
+            if isinstance(item, LayerCls) and getattr(item, "control_group", None):
+                excluded.add(item)
+
+    return excluded
+
+
+def _collect_tree_layers(node, result: set) -> None:
+    if node is None:
+        return
+    from folium.map import Layer as LayerCls
+
+    if isinstance(node, dict):
+        layer_obj = node.get("layer")
+        if isinstance(layer_obj, LayerCls):
+            result.add(layer_obj)
+        for child in node.get("children", []):
+            _collect_tree_layers(child, result)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_tree_layers(item, result)
