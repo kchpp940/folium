@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -46,27 +45,19 @@ class MeasureControl(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)  # noqa
 
-    resources = [
-        Resource(
-            name="leaflet_measure_js",
-            url="https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.js",
-            type="js",
-            plugin="MeasureControl",
-            package="leaflet-measure",
-            version="2.1.7",
-            kind="plugin",
-        ),
-        Resource(
-            name="leaflet_measure_css",
-            url="https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.css",
-            type="css",
-            plugin="MeasureControl",
-            package="leaflet-measure",
-            version="2.1.7",
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "leaflet_measure_js",
+            "https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
+
+    default_css = [
+        (
+            "leaflet_measure_css",
+            "https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.css",
+        )
+    ]
 
     def __init__(
         self,

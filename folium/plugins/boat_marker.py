@@ -1,6 +1,5 @@
 from folium.elements import JSCSSMixin
 from folium.map import Marker
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -43,26 +42,12 @@ class BoatMarker(JSCSSMixin, Marker):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="markerclusterjs",
-            url="https://unpkg.com/leaflet.boatmarker/leaflet.boatmarker.min.js",
-            type="js",
-            plugin="BoatMarker",
-            package="leaflet.boatmarker",
-            version=None,
-            kind="plugin",
-            legacy=True,
-            legacy_reason=(
-                "Historical copy-paste from MarkerCluster: the resource name "
-                "should be 'boatmarkerjs' but renaming would break callers who "
-                "rely on add_js_link('markerclusterjs', ...) to override this "
-                "asset.  Canonical owner of the name 'markerclusterjs' is "
-                "MarkerCluster."
-            ),
+    default_js = [
+        (
+            "markerclusterjs",
+            "https://unpkg.com/leaflet.boatmarker/leaflet.boatmarker.min.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

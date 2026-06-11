@@ -1,5 +1,4 @@
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.vector_layers import BaseMultiLocation, path_options
 
@@ -35,18 +34,12 @@ class AntPath(JSCSSMixin, BaseMultiLocation):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="antpath",
-            url="https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.1.2/dist/leaflet-ant-path.min.js",
-            type="js",
-            plugin="AntPath",
-            package="leaflet-ant-path",
-            version="1.1.2",
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "antpath",
+            "https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.1.2/dist/leaflet-ant-path.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(self, locations, popup=None, tooltip=None, **kwargs):
         super().__init__(

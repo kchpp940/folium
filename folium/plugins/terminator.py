@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 
 
@@ -18,18 +17,7 @@ class Terminator(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="terminator",
-            url="https://unpkg.com/@joergdietrich/leaflet.terminator",
-            type="js",
-            plugin="Terminator",
-            package="@joergdietrich/leaflet.terminator",
-            version=None,
-            kind="plugin",
-        ),
-    ]
-    default_js, default_css = build_defaults(resources)
+    default_js = [("terminator", "https://unpkg.com/@joergdietrich/leaflet.terminator")]
 
     def __init__(self):
         super().__init__()

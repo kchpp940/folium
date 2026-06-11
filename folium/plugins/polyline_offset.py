@@ -1,5 +1,4 @@
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.vector_layers import PolyLine
 
 
@@ -42,18 +41,12 @@ class PolyLineOffset(JSCSSMixin, PolyLine):
 
     """
 
-    resources = [
-        Resource(
-            name="polylineoffset",
-            url="https://cdn.jsdelivr.net/npm/leaflet-polylineoffset@1.1.1/leaflet.polylineoffset.min.js",
-            type="js",
-            plugin="PolyLineOffset",
-            package="leaflet-polylineoffset",
-            version="1.1.1",
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "polylineoffset",
+            "https://cdn.jsdelivr.net/npm/leaflet-polylineoffset@1.1.1/leaflet.polylineoffset.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(self, locations, popup=None, tooltip=None, offset=0, **kwargs):
         super().__init__(locations=locations, popup=popup, tooltip=tooltip, **kwargs)

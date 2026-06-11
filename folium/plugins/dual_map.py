@@ -3,7 +3,6 @@ from branca.element import Figure, MacroElement
 from folium.elements import EventHandler, JSCSSMixin
 from folium.folium import Map
 from folium.map import LayerControl
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import JsCode, deep_copy
 
@@ -46,18 +45,12 @@ class DualMap(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    resources = [
-        Resource(
-            name="Leaflet.Sync",
-            url="https://cdn.jsdelivr.net/gh/jieter/Leaflet.Sync/L.Map.Sync.min.js",
-            type="js",
-            plugin="DualMap",
-            package="Leaflet.Sync",
-            version=None,
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "Leaflet.Sync",
+            "https://cdn.jsdelivr.net/gh/jieter/Leaflet.Sync/L.Map.Sync.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(self, location=None, layout="horizontal", **kwargs):
         super().__init__()

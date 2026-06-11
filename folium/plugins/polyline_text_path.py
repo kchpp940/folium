@@ -1,6 +1,5 @@
 from folium.elements import JSCSSMixin
 from folium.features import MacroElement
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -44,18 +43,12 @@ class PolyLineTextPath(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="polylinetextpath",
-            url="https://cdn.jsdelivr.net/npm/leaflet-textpath@1.2.3/leaflet.textpath.min.js",
-            type="js",
-            plugin="PolyLineTextPath",
-            package="leaflet-textpath",
-            version="1.2.3",
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "polylinetextpath",
+            "https://cdn.jsdelivr.net/npm/leaflet-textpath@1.2.3/leaflet.textpath.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

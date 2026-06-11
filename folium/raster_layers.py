@@ -16,6 +16,7 @@ from folium.utilities import (
     image_to_url,
     mercator_transform,
     normalize_bounds_type,
+    normalize_raster_options,
     parse_options,
     remove_empty,
 )
@@ -130,27 +131,32 @@ class TileLayer(Layer):
         self.tile_name = (
             name if name is not None else "".join(tiles.lower().strip().split())
         )
-        super().__init__(
-            name=self.tile_name, overlay=overlay, control=control, show=show
+
+        layer_params, self.options, _ = normalize_raster_options(
+            name=self.tile_name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            attr=attr,
+            layer_options={
+                "min_zoom": min_zoom or 0,
+                "max_zoom": max_zoom or 18,
+                "max_native_zoom": max_native_zoom or max_zoom or 18,
+                "no_wrap": no_wrap,
+                "subdomains": subdomains,
+                "detect_retina": detect_retina,
+                "tms": tms,
+                "opacity": opacity,
+            },
+            extra_options=kwargs,
+            camelize=False,
         )
+        super().__init__(**layer_params)
         self._name = "TileLayer"
 
         self.tiles = tiles
         if not attr:
             raise ValueError("Custom tiles must have an attribution.")
-
-        self.options = remove_empty(
-            min_zoom=min_zoom or 0,
-            max_zoom=max_zoom or 18,
-            max_native_zoom=max_native_zoom or max_zoom or 18,
-            no_wrap=no_wrap,
-            attribution=attr,
-            subdomains=subdomains,
-            detect_retina=detect_retina,
-            tms=tms,
-            opacity=opacity,
-            **kwargs,
-        )
 
 
 class WmsTileLayer(Layer):
@@ -214,21 +220,26 @@ class WmsTileLayer(Layer):
         show: bool = True,
         **kwargs,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self.url = url
         kwargs["format"] = fmt
-        cql_filter = kwargs.pop("cql_filter", None)
-        self.options = parse_options(
-            layers=layers,
-            styles=styles,
-            transparent=transparent,
-            version=version,
-            attribution=attr,
-            **kwargs,
+
+        layer_params, self.options, _ = normalize_raster_options(
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            attr=attr,
+            layer_options={
+                "layers": layers,
+                "styles": styles,
+                "transparent": transparent,
+                "version": version,
+            },
+            extra_options=kwargs,
+            preserve_names=["cql_filter"],
+            camelize=True,
         )
-        # special parameter that shouldn't be camelized
-        if cql_filter:
-            self.options["cql_filter"] = cql_filter
+        super().__init__(**layer_params)
 
 
 class ImageOverlay(Layer):
@@ -321,10 +332,18 @@ class ImageOverlay(Layer):
         show: bool = True,
         **kwargs,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        layer_params, self.options, _ = normalize_raster_options(
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            bounds=bounds,
+            extra_options=kwargs,
+            camelize=False,
+        )
+        super().__init__(**layer_params)
         self._name = "ImageOverlay"
         self.bounds = bounds
-        self.options = remove_empty(**kwargs)
         self.pixelated = pixelated
         if mercator_project:
             image = mercator_transform(
@@ -391,12 +410,23 @@ class VideoOverlay(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        layer_params, self.options, _ = normalize_raster_options(
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            bounds=bounds,
+            layer_options={
+                "autoplay": autoplay,
+                "loop": loop,
+            },
+            extra_options=kwargs,
+            camelize=False,
+        )
+        super().__init__(**layer_params)
         self._name = "VideoOverlay"
         self.video_url = video_url
-
         self.bounds = bounds
-        self.options = remove_empty(autoplay=autoplay, loop=loop, **kwargs)
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """

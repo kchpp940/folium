@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -29,27 +28,18 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         https://leafletjs.com/reference.html#control-layers
     """
 
-    resources = [
-        Resource(
-            name="leaflet.groupedlayercontrol.min.js",
-            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.js",
-            type="js",
-            plugin="GroupedLayerControl",
-            package="leaflet-groupedlayercontrol",
-            version="0.6.1",
-            kind="plugin",
-        ),
-        Resource(
-            name="leaflet.groupedlayercontrol.min.css",
-            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.css",
-            type="css",
-            plugin="GroupedLayerControl",
-            package="leaflet-groupedlayercontrol",
-            version="0.6.1",
-            kind="plugin",
+    default_js = [
+        (
+            "leaflet.groupedlayercontrol.min.js",
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.js",  # noqa
         ),
     ]
-    default_js, default_css = build_defaults(resources)
+    default_css = [
+        (
+            "leaflet.groupedlayercontrol.min.css",
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.css",  # noqa
+        )
+    ]
 
     _template = Template("""
         {% macro script(this,kwargs) %}

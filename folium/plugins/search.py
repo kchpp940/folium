@@ -7,7 +7,6 @@ from folium.elements import JSCSSMixin
 # from folium.features import GeoJson, TopoJson
 from folium.folium import Map
 from folium.plugins import MarkerCluster
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty
 
@@ -87,27 +86,18 @@ class Search(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)  # noqa
 
-    resources = [
-        Resource(
-            name="Leaflet.Search.js",
-            url="https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.js",
-            type="js",
-            plugin="Search",
-            package="leaflet-search",
-            version="2.9.7",
-            kind="plugin",
-        ),
-        Resource(
-            name="Leaflet.Search.css",
-            url="https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.css",
-            type="css",
-            plugin="Search",
-            package="leaflet-search",
-            version="2.9.7",
-            kind="plugin",
-        ),
+    default_js = [
+        (
+            "Leaflet.Search.js",
+            "https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.js",
+        )
     ]
-    default_js, default_css = build_defaults(resources)
+    default_css = [
+        (
+            "Leaflet.Search.css",
+            "https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.css",
+        )
+    ]
 
     def __init__(
         self,

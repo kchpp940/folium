@@ -1,6 +1,5 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 
 
@@ -63,18 +62,12 @@ class FeatureGroupSubGroup(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="featuregroupsubgroupjs",
-            url="https://unpkg.com/leaflet.featuregroup.subgroup@1.0.2/dist/leaflet.featuregroup.subgroup.js",
-            type="js",
-            plugin="FeatureGroupSubGroup",
-            package="leaflet.featuregroup.subgroup",
-            version="1.0.2",
-            kind="plugin",
+    default_js = [
+        (
+            "featuregroupsubgroupjs",
+            "https://unpkg.com/leaflet.featuregroup.subgroup@1.0.2/dist/leaflet.featuregroup.subgroup.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(self, group, name=None, overlay=True, control=True, show=True):
         super().__init__(name=name, overlay=overlay, control=control, show=show)

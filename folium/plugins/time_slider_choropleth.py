@@ -1,7 +1,6 @@
 from folium.elements import JSCSSMixin
 from folium.features import GeoJson
 from folium.map import Layer
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 
 
@@ -160,27 +159,13 @@ class TimeSliderChoropleth(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="d3v4",
-            url="https://d3js.org/d3.v4.min.js",
-            type="js",
-            plugin="TimeSliderChoropleth",
-            package="d3",
-            version="4",
-            kind="dependency",
-        ),
-        Resource(
-            name="moment",
-            url="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
-            type="js",
-            plugin="TimeSliderChoropleth",
-            package="moment",
-            version="2.18.1",
-            kind="dependency",
+    default_js = [
+        ("d3v4", "https://d3js.org/d3.v4.min.js"),
+        (
+            "moment",
+            "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

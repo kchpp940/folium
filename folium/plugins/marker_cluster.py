@@ -1,6 +1,5 @@
 from folium.elements import JSCSSMixin
 from folium.map import Layer, Marker
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import remove_empty, validate_locations
 
@@ -56,36 +55,23 @@ class MarkerCluster(JSCSSMixin, Layer):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="markerclusterjs",
-            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
-            type="js",
-            plugin="MarkerCluster",
-            package="leaflet.markercluster",
-            version="1.1.0",
-            kind="plugin",
+    default_js = [
+        (
+            "markerclusterjs",
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js",
+        )
+    ]
+
+    default_css = [
+        (
+            "markerclustercss",
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
         ),
-        Resource(
-            name="markerclustercss",
-            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css",
-            type="css",
-            plugin="MarkerCluster",
-            package="leaflet.markercluster",
-            version="1.1.0",
-            kind="plugin",
-        ),
-        Resource(
-            name="markerclusterdefaultcss",
-            url="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
-            type="css",
-            plugin="MarkerCluster",
-            package="leaflet.markercluster",
-            version="1.1.0",
-            kind="plugin",
+        (
+            "markerclusterdefaultcss",
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

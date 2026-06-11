@@ -1,7 +1,6 @@
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 
 
@@ -35,18 +34,12 @@ class SideBySideLayers(JSCSSMixin, MacroElement):
         {% endmacro %}
         """)
 
-    resources = [
-        Resource(
-            name="leaflet.sidebyside",
-            url="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js",
-            type="js",
-            plugin="SideBySideLayers",
-            package="leaflet-side-by-side",
-            version="2.0.0",
-            kind="plugin",
+    default_js = [
+        (
+            "leaflet.sidebyside",
+            "https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(self, layer_left, layer_right):
         super().__init__()

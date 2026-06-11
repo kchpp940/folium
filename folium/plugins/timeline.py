@@ -5,7 +5,6 @@ from branca.element import MacroElement
 from folium.elements import JSCSSMixin
 from folium.features import GeoJson
 from folium.folium import Map
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import JsCode, get_bounds, remove_empty
 
@@ -91,27 +90,16 @@ class Timeline(GeoJson):
         {% endmacro %}
     """)
 
-    resources = [
-        Resource(
-            name="timeline",
-            url="https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js",
-            type="js",
-            plugin="Timeline",
-            package="leaflet.timeline",
-            version="1.6.0",
-            kind="plugin",
+    default_js = [
+        (
+            "timeline",
+            "https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js",
         ),
-        Resource(
-            name="moment",
-            url="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
-            type="js",
-            plugin="Timeline",
-            package="moment",
-            version="2.18.1",
-            kind="dependency",
+        (
+            "moment",
+            "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,
@@ -200,27 +188,16 @@ class TimelineSlider(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    resources = [
-        Resource(
-            name="timeline",
-            url="https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js",
-            type="js",
-            plugin="TimelineSlider",
-            package="leaflet.timeline",
-            version="1.6.0",
-            kind="plugin",
+    default_js = [
+        (
+            "timeline",
+            "https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js",
         ),
-        Resource(
-            name="moment",
-            url="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
-            type="js",
-            plugin="TimelineSlider",
-            package="moment",
-            version="2.18.1",
-            kind="dependency",
+        (
+            "moment",
+            "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

@@ -3,7 +3,6 @@ from __future__ import annotations
 from branca.element import MacroElement
 
 from folium.elements import JSCSSMixin
-from folium.plugins._resources import Resource, build_defaults
 from folium.template import Template
 from folium.utilities import JsCode, remove_empty, validate_location
 
@@ -120,18 +119,12 @@ class WebGLEarth(JSCSSMixin, MacroElement):
         {% endmacro %}
     """)
 
-    resources = [
-        Resource(
-            name="webglearth_v2_js",
-            url="https://www.webglearth.com/v2/api.js",
-            type="js",
-            plugin="WebGLEarth",
-            package="webglearth",
-            version="2",
-            kind="plugin",
+    default_js = [
+        (
+            "webglearth_v2_js",
+            "https://www.webglearth.com/v2/api.js",
         ),
     ]
-    default_js, default_css = build_defaults(resources)
 
     def __init__(
         self,

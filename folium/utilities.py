@@ -411,6 +411,98 @@ def remove_empty(**kwargs: TypeJsonValue) -> dict[str, TypeJsonValueNoNone]:
     return {key: value for key, value in kwargs.items() if value is not None}
 
 
+TypeRasterLayerParams = dict[str, Union[str, bool, None]]
+TypeRasterOptionsResult = tuple[
+    TypeRasterLayerParams,
+    dict[str, TypeJsonValueNoNone],
+    Optional[TypeBoundsReturn],
+]
+
+
+def normalize_raster_options(
+    *,
+    name: Optional[str] = None,
+    overlay: bool = False,
+    control: bool = True,
+    show: bool = True,
+    attr: Optional[str] = None,
+    bounds: Optional[TypeBounds] = None,
+    layer_options: Optional[dict[str, TypeJsonValue]] = None,
+    extra_options: Optional[dict[str, TypeJsonValue]] = None,
+    preserve_names: Optional[list[str]] = None,
+    camelize: bool = False,
+) -> TypeRasterOptionsResult:
+    """
+    Normalize raster layer options into a consistent structure.
+
+    Parameters
+    ----------
+    name : str, optional
+        Layer name for LayerControls.
+    overlay : bool, default False
+        Whether the layer is an overlay or base layer.
+    control : bool, default True
+        Whether the layer will be included in LayerControls.
+    show : bool, default True
+        Whether the layer will be shown on opening.
+    attr : str, optional
+        Attribution text, maps to 'attribution' in options.
+    bounds : TypeBounds, optional
+        Bounds for the layer ([[lat_min, lon_min], [lat_max, lon_max]]).
+    layer_options : dict, optional
+        Layer-specific options that should be included in the options dict.
+    extra_options : dict, optional
+        Additional options from **kwargs.
+    preserve_names : list of str, optional
+        Keys that should not be camelized even when camelize=True.
+    camelize : bool, default False
+        Whether to convert keys to lowerCamelCase.
+
+    Returns
+    -------
+    tuple : (layer_params, options, normalized_bounds)
+        layer_params : dict
+            Parameters to pass to Layer.__init__ (name, overlay, control, show).
+        options : dict
+            Normalized options dict for Leaflet.
+        normalized_bounds : list or None
+            Normalized bounds if provided.
+    """
+    layer_params: TypeRasterLayerParams = {
+        "name": name,
+        "overlay": overlay,
+        "control": control,
+        "show": show,
+    }
+
+    all_options: dict[str, TypeJsonValue] = {}
+    if layer_options:
+        all_options.update(layer_options)
+    if extra_options:
+        all_options.update(extra_options)
+    if attr is not None:
+        all_options["attribution"] = attr
+
+    preserve_names = preserve_names or []
+    preserved: dict[str, TypeJsonValue] = {}
+    for key in preserve_names:
+        if key in all_options:
+            preserved[key] = all_options.pop(key)
+
+    if camelize:
+        options = parse_options(**all_options)
+    else:
+        options = remove_empty(**all_options)
+
+    options.update({k: v for k, v in preserved.items() if v is not None})
+
+    normalized_bounds: Optional[TypeBoundsReturn] = None
+    if bounds is not None:
+        normalized_bounds = normalize_bounds_type(bounds)
+
+    return layer_params, options, normalized_bounds
+
+
 def escape_backticks(text: str) -> str:
     """Escape backticks so text can be used in a JS template."""
     return re.sub(r"(?<!\\)`", r"\`", text)
