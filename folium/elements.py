@@ -1,5 +1,6 @@
 from functools import wraps
 from typing import Any, Optional, TypedDict, Union
+import json
 
 from branca.element import (
     CssLink,
@@ -36,6 +37,73 @@ class LayerMetadata(TypedDict, total=False):
     collapsible: bool
     collapsed: bool
     position: str
+
+
+_VALID_POSITIONS = frozenset({
+    "topleft", "topright", "bottomleft", "bottomright",
+})
+
+
+def normalize_layer_metadata(meta: Union[LayerMetadata, dict, None]) -> Optional[dict]:
+    """将任意 metadata 输入规范化为统一格式。
+
+    - 过滤 None 值
+    - 校验 legend 项结构
+    - 规范化 position 到 Leaflet 合法值
+    - 填充 collapsible / collapsed / position 默认值
+
+    Parameters
+    ----------
+    meta : LayerMetadata or dict or None
+        原始元数据。
+
+    Returns
+    -------
+    dict or None
+        规范化后的元数据；输入为 None 时返回 None。
+    """
+    if meta is None:
+        return None
+
+    result: dict[str, Any] = {}
+
+    for key in (
+        "title", "description", "unit", "resolution",
+        "source_url", "source_text", "updated_time", "copyright",
+    ):
+        value = meta.get(key)
+        if value is not None:
+            result[key] = value
+
+    legend = meta.get("legend")
+    if legend is not None:
+        if not isinstance(legend, list):
+            raise TypeError(
+                f"caption['legend'] must be a list, got {type(legend).__name__}"
+            )
+        validated = []
+        for i, item in enumerate(legend):
+            if not isinstance(item, dict) or "label" not in item or "color" not in item:
+                raise ValueError(
+                    f"caption['legend'][{i}] must contain 'label' and 'color' keys, "
+                    f"got {item!r}"
+                )
+            validated.append({"label": item["label"], "color": item["color"]})
+        if validated:
+            result["legend"] = validated
+
+    position = meta.get("position", "bottomright")
+    if position not in _VALID_POSITIONS:
+        raise ValueError(
+            f"caption['position'] must be one of {sorted(_VALID_POSITIONS)}, "
+            f"got {position!r}"
+        )
+    result["position"] = position
+
+    result["collapsible"] = bool(meta.get("collapsible", True))
+    result["collapsed"] = bool(meta.get("collapsed", False))
+
+    return result
 
 
 def leaflet_method(fn):
@@ -216,371 +284,325 @@ class MethodCall(MacroElement):
         self.kwargs = kwargs
 
 
-class CaptionControl(MacroElement):
-    """Map 级统一元数据说明控件。
+_CAPTION_CSS = """\
+<style>
+    .leaflet-control-caption {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 4px;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+        padding: 8px 12px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #333;
+        max-width: 300px;
+    }
+    .leaflet-control-caption .caption-section {
+        padding-bottom: 8px;
+        margin-bottom: 8px;
+        border-bottom: 1px solid #eee;
+    }
+    .leaflet-control-caption .caption-section:last-child {
+        padding-bottom: 0;
+        margin-bottom: 0;
+        border-bottom: none;
+    }
+    .leaflet-control-caption .caption-title {
+        font-weight: bold;
+        font-size: 13px;
+        margin-bottom: 4px;
+        color: #222;
+    }
+    .leaflet-control-caption .caption-header {
+        margin-bottom: 4px;
+    }
+    .leaflet-control-caption .caption-toggle {
+        float: right;
+        cursor: pointer;
+        font-weight: bold;
+        color: #666;
+        margin-left: 8px;
+        user-select: none;
+    }
+    .leaflet-control-caption .caption-body {
+        margin-top: 4px;
+    }
+    .leaflet-control-caption .caption-row {
+        margin: 2px 0;
+    }
+    .leaflet-control-caption .caption-label {
+        color: #666;
+        margin-right: 4px;
+    }
+    .leaflet-control-caption .caption-source a {
+        color: #0078a8;
+        text-decoration: none;
+    }
+    .leaflet-control-caption .caption-source a:hover {
+        text-decoration: underline;
+    }
+    .leaflet-control-caption .caption-legend {
+        margin-top: 6px;
+    }
+    .leaflet-control-caption .caption-legend-item {
+        display: flex;
+        align-items: center;
+        margin: 2px 0;
+    }
+    .leaflet-control-caption .caption-legend-color {
+        display: inline-block;
+        width: 20px;
+        height: 14px;
+        margin-right: 6px;
+        border: 1px solid #ccc;
+        border-radius: 2px;
+    }
+    .leaflet-control-caption .caption-copyright {
+        margin-top: 6px;
+        color: #888;
+        font-size: 11px;
+        font-style: italic;
+    }
+    .leaflet-control-caption.caption-collapsed .caption-body,
+    .leaflet-control-caption.caption-collapsed .caption-section {
+        display: none;
+    }
+    .leaflet-control-caption .caption-empty {
+        color: #999;
+        font-style: italic;
+    }
+</style>"""
 
-    从 CaptionRegistry 获取当前可见图层的 metadata 并动态渲染内容。
-    多图层叠加时会按顺序合并显示所有可见图层的元数据。
+_CAPTION_JS_TEMPLATE = """\
+(function() {{
+    var CaptionControl = L.Control.extend({{
+        options: {{
+            position: {position_js},
+            collapsible: {collapsible_js},
+            collapsed: {collapsed_js}
+        }},
 
-    Parameters
-    ----------
-    registry : CaptionRegistry
-        关联的元数据注册表实例。
-    position : str, default 'bottomright'
-        控件位置。
-    collapsible : bool, default True
-        面板是否可折叠。
-    collapsed : bool, default False
-        面板是否默认折叠。
-    """
+        initialize: function(options) {{
+            L.setOptions(this, options);
+            this._registryId = options.registryId;
+            this._visibleLayers = [];
+        }},
 
-    _template = Template("""
-        {% macro header(this, kwargs) %}
-            <style>
-                .leaflet-control-caption {
-                    background: rgba(255, 255, 255, 0.95);
-                    border-radius: 4px;
-                    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
-                    padding: 8px 12px;
-                    font-size: 12px;
-                    line-height: 1.5;
-                    color: #333;
-                    max-width: 300px;
-                }
-                .leaflet-control-caption .caption-section {
-                    padding-bottom: 8px;
-                    margin-bottom: 8px;
-                    border-bottom: 1px solid #eee;
-                }
-                .leaflet-control-caption .caption-section:last-child {
-                    padding-bottom: 0;
-                    margin-bottom: 0;
-                    border-bottom: none;
-                }
-                .leaflet-control-caption .caption-title {
-                    font-weight: bold;
-                    font-size: 13px;
-                    margin-bottom: 4px;
-                    color: #222;
-                }
-                .leaflet-control-caption .caption-header {
-                    margin-bottom: 4px;
-                }
-                .leaflet-control-caption .caption-toggle {
-                    float: right;
-                    cursor: pointer;
-                    font-weight: bold;
-                    color: #666;
-                    margin-left: 8px;
-                    user-select: none;
-                }
-                .leaflet-control-caption .caption-body {
-                    margin-top: 4px;
-                }
-                .leaflet-control-caption .caption-row {
-                    margin: 2px 0;
-                }
-                .leaflet-control-caption .caption-label {
-                    color: #666;
-                    margin-right: 4px;
-                }
-                .leaflet-control-caption .caption-source a {
-                    color: #0078a8;
-                    text-decoration: none;
-                }
-                .leaflet-control-caption .caption-source a:hover {
-                    text-decoration: underline;
-                }
-                .leaflet-control-caption .caption-legend {
-                    margin-top: 6px;
-                }
-                .leaflet-control-caption .caption-legend-item {
-                    display: flex;
-                    align-items: center;
-                    margin: 2px 0;
-                }
-                .leaflet-control-caption .caption-legend-color {
-                    display: inline-block;
-                    width: 20px;
-                    height: 14px;
-                    margin-right: 6px;
-                    border: 1px solid #ccc;
-                    border-radius: 2px;
-                }
-                .leaflet-control-caption .caption-copyright {
-                    margin-top: 6px;
-                    color: #888;
-                    font-size: 11px;
-                    font-style: italic;
-                }
-                .leaflet-control-caption.caption-collapsed .caption-body,
-                .leaflet-control-caption.caption-collapsed .caption-section {
-                    display: none;
-                }
-                .leaflet-control-caption .caption-empty {
-                    color: #999;
-                    font-style: italic;
-                }
-            </style>
-        {% endmacro %}
+        onAdd: function(map) {{
+            this._container = L.DomUtil.create('div', 'leaflet-control-caption');
+            this._buildContent();
+            L.DomEvent.disableClickPropagation(this._container);
+            L.DomEvent.disableScrollPropagation(this._container);
+            return this._container;
+        }},
 
-        {% macro script(this, kwargs) %}
-            (function() {
-                var CaptionControl = L.Control.extend({
-                    options: {
-                        position: 'bottomright',
-                        collapsible: true,
-                        collapsed: false
-                    },
+        _renderMetadata: function(meta) {{
+            var html = '';
+            if (!meta) return html;
 
-                    initialize: function(options) {
-                        L.setOptions(this, options);
-                        this._registryId = options.registryId;
-                        this._visibleLayers = [];
-                    },
+            if (meta.title) {{
+                html += '<div class="caption-title">' + meta.title + '</div>';
+            }}
 
-                    onAdd: function(map) {
-                        this._container = L.DomUtil.create('div', 'leaflet-control-caption');
-                        this._buildContent();
-                        L.DomEvent.disableClickPropagation(this._container);
-                        L.DomEvent.disableScrollPropagation(this._container);
-                        return this._container;
-                    },
+            if (meta.description) {{
+                html += '<div class="caption-row caption-description">' +
+                    meta.description + '</div>';
+            }}
 
-                    _renderMetadata: function(meta) {
-                        var html = '';
-                        if (!meta) return html;
+            if (meta.unit || meta.resolution || meta.updated_time) {{
+                var metaRows = [];
+                if (meta.unit) {{
+                    metaRows.push('<span class="caption-label">Unit:</span>' +
+                        '<span class="caption-value">' + meta.unit + '</span>');
+                }}
+                if (meta.resolution) {{
+                    metaRows.push('<span class="caption-label">Resolution:</span>' +
+                        '<span class="caption-value">' + meta.resolution + '</span>');
+                }}
+                if (meta.updated_time) {{
+                    metaRows.push('<span class="caption-label">Updated:</span>' +
+                        '<span class="caption-value">' + meta.updated_time + '</span>');
+                }}
+                html += '<div class="caption-row">' + metaRows.join(' | ') + '</div>';
+            }}
 
-                        if (meta.title) {
-                            html += '<div class="caption-title">' + meta.title + '</div>';
-                        }
+            if (meta.source_url) {{
+                var sourceText = meta.source_text || meta.source_url;
+                html += '<div class="caption-row caption-source">' +
+                    '<span class="caption-label">Source:</span>' +
+                    '<a href="' + meta.source_url + '" target="_blank" rel="noopener">' +
+                    sourceText + '</a></div>';
+            }}
 
-                        if (meta.description) {
-                            html += '<div class="caption-row caption-description">' +
-                                meta.description + '</div>';
-                        }
+            if (meta.legend && meta.legend.length > 0) {{
+                var legendHtml = '<div class="caption-legend">';
+                for (var i = 0; i < meta.legend.length; i++) {{
+                    var item = meta.legend[i];
+                    legendHtml += '<div class="caption-legend-item">' +
+                        '<span class="caption-legend-color" style="background-color:' +
+                        item.color + '"></span>' +
+                        '<span class="caption-legend-label">' + item.label + '</span>' +
+                        '</div>';
+                }}
+                legendHtml += '</div>';
+                html += legendHtml;
+            }}
 
-                        if (meta.unit || meta.resolution || meta.updated_time) {
-                            var metaRows = [];
-                            if (meta.unit) {
-                                metaRows.push('<span class="caption-label">Unit:</span>' +
-                                    '<span class="caption-value">' + meta.unit + '</span>');
-                            }
-                            if (meta.resolution) {
-                                metaRows.push('<span class="caption-label">Resolution:</span>' +
-                                    '<span class="caption-value">' + meta.resolution + '</span>');
-                            }
-                            if (meta.updated_time) {
-                                metaRows.push('<span class="caption-label">Updated:</span>' +
-                                    '<span class="caption-value">' + meta.updated_time + '</span>');
-                            }
-                            html += '<div class="caption-row">' + metaRows.join(' | ') + '</div>';
-                        }
+            if (meta.copyright) {{
+                html += '<div class="caption-copyright">' +
+                    meta.copyright + '</div>';
+            }}
 
-                        if (meta.source_url) {
-                            var sourceText = meta.source_text || meta.source_url;
-                            html += '<div class="caption-row caption-source">' +
-                                '<span class="caption-label">Source:</span>' +
-                                '<a href="' + meta.source_url + '" target="_blank" rel="noopener">' +
-                                sourceText + '</a></div>';
-                        }
+            return html;
+        }},
 
-                        if (meta.legend && meta.legend.length > 0) {
-                            var legendHtml = '<div class="caption-legend">';
-                            for (var i = 0; i < meta.legend.length; i++) {
-                                var item = meta.legend[i];
-                                legendHtml += '<div class="caption-legend-item">' +
-                                    '<span class="caption-legend-color" style="background-color:' +
-                                    item.color + '"></span>' +
-                                    '<span class="caption-legend-label">' + item.label + '</span>' +
-                                    '</div>';
-                            }
-                            legendHtml += '</div>';
-                            html += legendHtml;
-                        }
+        _buildContent: function() {{
+            var html = '';
 
-                        if (meta.copyright) {
-                            html += '<div class="caption-copyright">' +
-                                meta.copyright + '</div>';
-                        }
+            if (this.options.collapsible) {{
+                html += '<span class="caption-toggle" title="Toggle">' +
+                    (this.options.collapsed ? '+' : '&minus;') + '</span>';
+            }}
 
-                        return html;
-                    },
+            html += '<div class="caption-body">';
 
-                    _buildContent: function() {
-                        var html = '';
+            if (this._visibleLayers.length === 0) {{
+                html += '<div class="caption-empty">No active layer metadata</div>';
+            }} else {{
+                for (var i = 0; i < this._visibleLayers.length; i++) {{
+                    var layerMeta = this._visibleLayers[i];
+                    var sectionClass = 'caption-section';
+                    if (i === this._visibleLayers.length - 1) {{
+                        sectionClass += ' last';
+                    }}
+                    html += '<div class="' + sectionClass + '">' +
+                        this._renderMetadata(layerMeta) + '</div>';
+                }}
+            }}
 
-                        if (this.options.collapsible) {
-                            html += '<span class="caption-toggle" title="Toggle">' +
-                                (this.options.collapsed ? '+' : '&minus;') + '</span>';
-                        }
+            html += '</div>';
 
-                        html += '<div class="caption-body">';
+            this._container.innerHTML = html;
 
-                        if (this._visibleLayers.length === 0) {
-                            html += '<div class="caption-empty">No active layer metadata</div>';
-                        } else {
-                            for (var i = 0; i < this._visibleLayers.length; i++) {
-                                var layerMeta = this._visibleLayers[i];
-                                var sectionClass = 'caption-section';
-                                if (i === this._visibleLayers.length - 1) {
-                                    sectionClass += ' last';
-                                }
-                                html += '<div class="' + sectionClass + '">' +
-                                    this._renderMetadata(layerMeta) + '</div>';
-                            }
-                        }
+            if (this.options.collapsible) {{
+                var toggle = this._container.querySelector('.caption-toggle');
+                var self = this;
+                L.DomEvent.on(toggle, 'click', function(e) {{
+                    L.DomEvent.stopPropagation(e);
+                    self._toggle();
+                }});
+            }}
 
-                        html += '</div>';
+            if (this.options.collapsed) {{
+                L.DomUtil.addClass(this._container, 'caption-collapsed');
+            }}
+        }},
 
-                        this._container.innerHTML = html;
+        _toggle: function() {{
+            var collapsed = L.DomUtil.hasClass(
+                this._container, 'caption-collapsed');
+            if (collapsed) {{
+                L.DomUtil.removeClass(this._container, 'caption-collapsed');
+                this._container.querySelector('.caption-toggle').innerHTML = '&minus;';
+            }} else {{
+                L.DomUtil.addClass(this._container, 'caption-collapsed');
+                this._container.querySelector('.caption-toggle').innerHTML = '+';
+            }}
+        }},
 
-                        if (this.options.collapsible) {
-                            var toggle = this._container.querySelector('.caption-toggle');
-                            var self = this;
-                            L.DomEvent.on(toggle, 'click', function(e) {
-                                L.DomEvent.stopPropagation(e);
-                                self._toggle();
-                            });
-                        }
+        setVisibleLayers: function(layerMetas) {{
+            this._visibleLayers = layerMetas;
+            if (this._container) {{
+                this._buildContent();
+            }}
+            this._container.style.display =
+                (layerMetas.length > 0) ? '' : 'none';
+        }}
+    }});
 
-                        if (this.options.collapsed) {
-                            L.DomUtil.addClass(this._container, 'caption-collapsed');
-                        }
-                    },
+    L.control.caption = function(options) {{
+        return new CaptionControl(options);
+    }};
 
-                    _toggle: function() {
-                        var collapsed = L.DomUtil.hasClass(
-                            this._container, 'caption-collapsed');
-                        if (collapsed) {
-                            L.DomUtil.removeClass(this._container, 'caption-collapsed');
-                            this._container.querySelector('.caption-toggle').innerHTML = '&minus;';
-                        } else {
-                            L.DomUtil.addClass(this._container, 'caption-collapsed');
-                            this._container.querySelector('.caption-toggle').innerHTML = '+';
-                        }
-                    },
+    window.__captionRegistry_{registry_id} = {{
+        control: null,
+        layers: {{}},
+        visibleOrder: [],
 
-                    setVisibleLayers: function(layerMetas) {
-                        this._visibleLayers = layerMetas;
-                        if (this._container) {
-                            this._buildContent();
-                        }
-                        this._container.style.display =
-                            (layerMetas.length > 0) ? '' : 'none';
-                    }
-                });
+        register: function(layerId, layerVar, metadata) {{
+            this.layers[layerId] = {{
+                layerVar: layerVar,
+                metadata: metadata,
+                visible: false
+            }};
+            var self = this;
 
-                L.control.caption = function(options) {
-                    return new CaptionControl(options);
-                };
+            if (layerVar && layerVar.on) {{
+                layerVar.on('add', function() {{
+                    self.layers[layerId].visible = true;
+                    var idx = self.visibleOrder.indexOf(layerId);
+                    if (idx === -1) {{
+                        self.visibleOrder.push(layerId);
+                    }}
+                    self._update();
+                }});
+                layerVar.on('remove', function() {{
+                    self.layers[layerId].visible = false;
+                    var idx = self.visibleOrder.indexOf(layerId);
+                    if (idx !== -1) {{
+                        self.visibleOrder.splice(idx, 1);
+                    }}
+                    self._update();
+                }});
+            }}
+        }},
 
-                window.__captionRegistry_{{ this.registry_id }} = {
-                    control: null,
-                    layers: {},
-                    visibleOrder: [],
+        setInitialVisible: function(layerId, visible) {{
+            if (this.layers[layerId]) {{
+                this.layers[layerId].visible = visible;
+                if (visible) {{
+                    var idx = this.visibleOrder.indexOf(layerId);
+                    if (idx === -1) {{
+                        this.visibleOrder.push(layerId);
+                    }}
+                }}
+            }}
+        }},
 
-                    register: function(layerId, layerVar, metadata) {
-                        this.layers[layerId] = {
-                            layerVar: layerVar,
-                            metadata: metadata,
-                            visible: false
-                        };
-                        var self = this;
+        _update: function() {{
+            if (!this.control) return;
+            var visibleMetas = [];
+            for (var i = 0; i < this.visibleOrder.length; i++) {{
+                var layerId = this.visibleOrder[i];
+                if (this.layers[layerId] && this.layers[layerId].visible) {{
+                    visibleMetas.push(this.layers[layerId].metadata);
+                }}
+            }}
+            this.control.setVisibleLayers(visibleMetas);
+        }},
 
-                        if (layerVar && layerVar.on) {
-                            layerVar.on('add', function() {
-                                self.layers[layerId].visible = true;
-                                var idx = self.visibleOrder.indexOf(layerId);
-                                if (idx === -1) {
-                                    self.visibleOrder.push(layerId);
-                                }
-                                self._update();
-                            });
-                            layerVar.on('remove', function() {
-                                self.layers[layerId].visible = false;
-                                var idx = self.visibleOrder.indexOf(layerId);
-                                if (idx !== -1) {
-                                    self.visibleOrder.splice(idx, 1);
-                                }
-                                self._update();
-                            });
-                        }
-                    },
+        initControl: function(control) {{
+            this.control = control;
+            this._update();
+        }}
+    }};
 
-                    setInitialVisible: function(layerId, visible) {
-                        if (this.layers[layerId]) {
-                            this.layers[layerId].visible = visible;
-                            if (visible) {
-                                var idx = this.visibleOrder.indexOf(layerId);
-                                if (idx === -1) {
-                                    this.visibleOrder.push(layerId);
-                                }
-                            }
-                        }
-                    },
-
-                    _update: function() {
-                        if (!this.control) return;
-                        var visibleMetas = [];
-                        for (var i = 0; i < this.visibleOrder.length; i++) {
-                            var layerId = this.visibleOrder[i];
-                            if (this.layers[layerId] && this.layers[layerId].visible) {
-                                visibleMetas.push(this.layers[layerId].metadata);
-                            }
-                        }
-                        this.control.setVisibleLayers(visibleMetas);
-                    },
-
-                    initControl: function(control) {
-                        this.control = control;
-                        this._update();
-                    }
-                };
-
-                var {{ this.get_name() }} = L.control.caption({
-                    position: {{ this.options.position | tojson }},
-                    collapsible: {{ this.options.collapsible | tojson }},
-                    collapsed: {{ this.options.collapsed | tojson }},
-                    registryId: {{ this.registry_id | tojson }}
-                });
-                {{ this.get_name() }}.addTo({{ this._parent.get_name() }});
-                window.__captionRegistry_{{ this.registry_id }}.initControl({{ this.get_name() }});
-            })();
-        {% endmacro %}
-    """)
-
-    def __init__(
-        self,
-        registry_id: str,
-        position: str = "bottomright",
-        collapsible: bool = True,
-        collapsed: bool = False,
-    ):
-        super().__init__()
-        self._name = "CaptionControl"
-        self.registry_id = registry_id
-        self.options = {
-            "position": position,
-            "collapsible": collapsible,
-            "collapsed": collapsed,
-        }
+    var {ctrl_var} = L.control.caption({{
+        position: {position_js},
+        collapsible: {collapsible_js},
+        collapsed: {collapsed_js},
+        registryId: {registry_id_js}
+    }});
+    {ctrl_var}.addTo({map_var});
+    window.__captionRegistry_{registry_id}.initControl({ctrl_var});
+}})();
+"""
 
 
-class CaptionRegistry(MacroElement):
-    """Map 级元数据注册表。
+class CaptionRegistry:
+    """Map 级元数据注册表（纯 Python 管理器，不参与渲染树）。
 
-    统一管理所有图层的 metadata，监听图层显示/隐藏事件，
-    通知 CaptionControl 动态更新显示内容。
-
-    Parameters
-    ----------
-    position : str, default 'bottomright'
-        说明面板位置。
-    collapsible : bool, default True
-        面板是否可折叠。
-    collapsed : bool, default False
-        面板是否默认折叠。
+    统一管理所有图层的 metadata，向 Figure 的 header/script
+    直接注入 CSS/JS，不依赖 Map 的 render 遍历时序。
     """
 
     def __init__(
@@ -589,23 +611,41 @@ class CaptionRegistry(MacroElement):
         collapsible: bool = True,
         collapsed: bool = False,
     ):
-        super().__init__()
-        self._name = "CaptionRegistry"
-        self.registry_id = self.get_name().replace(".", "_")
-        self._caption_control = CaptionControl(
-            registry_id=self.registry_id,
-            position=position,
-            collapsible=collapsible,
-            collapsed=collapsed,
-        )
+        self._position = position
+        self._collapsible = collapsible
+        self._collapsed = collapsed
         self._layers: dict[str, dict] = {}
-        self._initialized = False
+        self._control_added = False
+        self._map_obj = None
+        self._registry_id = None
+        self._ctrl_var = None
 
-    def render(self, **kwargs):
-        if not self._initialized:
-            self.add_child(self._caption_control, name="caption_control")
-            self._initialized = True
-        super().render(**kwargs)
+    def _ensure_control(self, map_obj):
+        if self._control_added:
+            return
+        self._map_obj = map_obj
+        self._registry_id = id(self)
+        self._ctrl_var = f"caption_control_{self._registry_id}"
+
+        figure = map_obj.get_root()
+        figure.header.add_child(
+            Element(_CAPTION_CSS), name="caption_styles",
+        )
+
+        control_js = _CAPTION_JS_TEMPLATE.format(
+            registry_id=self._registry_id,
+            registry_id_js=json.dumps(self._registry_id),
+            ctrl_var=self._ctrl_var,
+            map_var=map_obj.get_name(),
+            position_js=json.dumps(self._position),
+            collapsible_js=json.dumps(self._collapsible),
+            collapsed_js=json.dumps(self._collapsed),
+        )
+        figure.script.add_child(
+            Element(control_js), name="caption_control",
+        )
+
+        self._control_added = True
 
     def register_layer(
         self,
@@ -613,83 +653,40 @@ class CaptionRegistry(MacroElement):
         layer_var_name: str,
         metadata: Union[LayerMetadata, dict, None],
         initially_visible: bool = True,
+        map_obj=None,
     ):
-        """注册一个图层的 metadata。
-
-        Parameters
-        ----------
-        layer_id : str
-            图层唯一标识。
-        layer_var_name : str
-            图层对应的 JavaScript 变量名。
-        metadata : LayerMetadata or dict or None
-            图层元数据。
-        initially_visible : bool, default True
-            图层初始是否可见。
-        """
         if metadata is None:
             return
 
-        normalized = self._normalize_metadata(metadata)
+        normalized = normalize_layer_metadata(metadata)
+        if normalized is None:
+            return
+
+        if map_obj is not None:
+            self._ensure_control(map_obj)
+
         self._layers[layer_id] = {
             "layer_var_name": layer_var_name,
             "metadata": normalized,
             "visible": initially_visible,
         }
 
-        class _RegisterScript(MacroElement):
-            _template = Template("""
-                {% macro script(this, kwargs) %}
-                    (function() {
-                        var registry = window.__captionRegistry_{{ this.registry_id }};
-                        if (registry) {
-                            var layerVar = {{ this.layer_var_name }};
-                            registry.register(
-                                {{ this.layer_id | tojson }},
-                                layerVar,
-                                {{ this.metadata | tojson }}
-                            );
-                            registry.setInitialVisible(
-                                {{ this.layer_id | tojson }},
-                                {{ this.initially_visible | tojson }}
-                            );
-                        }
-                    })();
-                {% endmacro %}
-            """)
+        if not self._control_added:
+            return
 
-            def __init__(self, registry_id, layer_id, layer_var_name, metadata, initially_visible):
-                super().__init__()
-                self._name = "RegisterScript"
-                self.registry_id = registry_id
-                self.layer_id = layer_id
-                self.layer_var_name = layer_var_name
-                self.metadata = metadata
-                self.initially_visible = initially_visible
-
-        script_el = _RegisterScript(
-            registry_id=self.registry_id,
-            layer_id=layer_id,
-            layer_var_name=layer_var_name,
-            metadata=normalized,
-            initially_visible=initially_visible,
+        register_js = (
+            f"(function() {{"
+            f"var registry = window.__captionRegistry_{self._registry_id};"
+            f"if (registry) {{"
+            f"var layerVar = {layer_var_name};"
+            f"registry.register({json.dumps(layer_id)}, layerVar, {json.dumps(normalized)});"
+            f"registry.setInitialVisible({json.dumps(layer_id)}, {json.dumps(initially_visible)});"
+            f"}}"
+            f"}})();"
         )
-        self.add_child(script_el, name=f"reg_{layer_id}")
-
-    def _normalize_metadata(self, meta: Union[LayerMetadata, dict]) -> dict:
-        """将 metadata 转换为标准化格式。"""
-        normalized: dict[str, Any] = {
-            "title": meta.get("title"),
-            "description": meta.get("description"),
-            "unit": meta.get("unit"),
-            "resolution": meta.get("resolution"),
-            "source_url": meta.get("source_url"),
-            "source_text": meta.get("source_text"),
-            "updated_time": meta.get("updated_time"),
-            "copyright": meta.get("copyright"),
-            "legend": meta.get("legend"),
-        }
-        return {k: v for k, v in normalized.items() if v is not None}
+        self._map_obj.get_root().script.add_child(
+            Element(register_js), name=f"caption_reg_{layer_id}",
+        )
 
 
 class CaptionMixin:
@@ -697,6 +694,10 @@ class CaptionMixin:
 
     图层只需注册 metadata 到 Map 级的 CaptionRegistry，
     由统一的 CaptionControl 根据当前可见图层动态展示内容。
+
+    注册时机通过两条显式路径保证：
+    - ``add_to()`` : 调用 ``super().add_to()`` 后，_parent 已就绪，立即注册
+    - ``render()`` : 兜底路径，覆盖 ``add_child()`` 等未经过 ``add_to`` 的场景
     """
 
     def _init_caption(
@@ -704,40 +705,23 @@ class CaptionMixin:
         caption: Optional[Union[LayerMetadata, dict]],
         show: bool = True,
     ):
-        """初始化图层的 metadata 注册。
-
-        Parameters
-        ----------
-        caption : LayerMetadata or dict or None
-            图层元数据配置。
-        show : bool, default True
-            图层初始是否可见。
-        """
         self._caption_meta = caption
         self._caption_show = show
         self._caption_registered = False
-        self._caption_parent = None
-
-    @property
-    def _parent(self):
-        return self._caption_parent
-
-    @_parent.setter
-    def _parent(self, value):
-        self._caption_parent = value
-        if value is not None and not self._caption_registered:
-            self._register_to_registry()
 
     def add_to(self, parent, name=None):
-        """将图层添加到父元素，并注册 metadata 到 CaptionRegistry。"""
         result = super().add_to(parent, name=name)
+        self._try_register()
         return result
 
-    def _register_to_registry(self):
-        """将当前图层的 metadata 注册到 Map 的 CaptionRegistry。"""
-        if self._caption_meta is None or self._caption_parent is None:
+    def render(self, **kwargs):
+        self._try_register()
+        super().render(**kwargs)
+
+    def _try_register(self):
+        if self._caption_meta is None or self._caption_registered:
             return
-        if self._caption_registered:
+        if not hasattr(self, "_parent") or self._parent is None:
             return
 
         map_obj = self._find_map()
@@ -750,31 +734,27 @@ class CaptionMixin:
             layer_var_name=self.get_name(),
             metadata=self._caption_meta,
             initially_visible=self._caption_show,
+            map_obj=map_obj,
         )
         self._caption_registered = True
 
     def _find_map(self):
-        """向上查找父链中的 Map 对象。"""
         from folium.folium import Map
         from folium.map import FeatureGroup, Layer
 
-        current = self._caption_parent
+        current = self._parent
         while current is not None:
             if isinstance(current, Map):
                 return current
             if isinstance(current, (FeatureGroup, Layer)):
-                current = getattr(current, "_caption_parent", None) or getattr(
-                    current, "_parent", None
-                )
+                current = getattr(current, "_parent", None)
             else:
-                break
+                current = None
         return None
 
     def _get_or_create_registry(self, map_obj) -> CaptionRegistry:
-        """获取或创建 Map 上的 CaptionRegistry。"""
         registry = getattr(map_obj, "_caption_registry", None)
         if registry is None:
             registry = CaptionRegistry()
             map_obj._caption_registry = registry
-            registry.add_to(map_obj)
         return registry
