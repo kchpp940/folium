@@ -18,10 +18,14 @@ class FloatImage(CaptionMixin, MacroElement):
         Vertical position from the bottom, as a percentage of screen height.
     left: int, default 75
         Horizontal position from the left, as a percentage of screen width.
-    caption: dict or LayerMetadata, optional
-        Metadata and legend caption for the float image.
-        See folium.raster_layers.ImageOverlay for the full list of supported keys.
-        Parameter accepts both LayerMetadata TypedDict or plain dict.
+    caption: LayerMetadata or dict, optional
+        Metadata and legend caption displayed for this float image in the
+        Map-level unified Caption panel.  Accepts either a plain ``dict``
+        with the keys documented in :class:`folium.LayerMetadata` or a
+        :class:`folium.LayerMetadata` TypedDict instance.
+
+        See :class:`folium.raster_layers.ImageOverlay` for the full list of
+        supported ``caption`` keys and the multi-layer merge rules.
     **kwargs
         Additional keyword arguments are applied as CSS properties.
         For example: `width='300px'`.

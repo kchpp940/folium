@@ -15,16 +15,87 @@ from folium.utilities import JsCode, camelize
 
 
 class LegendItem(TypedDict, total=False):
-    """色标图例项"""
+    """
+    A single item in a legend color bar.
+
+    Use this to define legend entries for raster layer captions.
+    Each item is rendered as a color swatch followed by its label.
+
+    Parameters
+    ----------
+    label : str
+        The text label describing this legend entry.
+    color : str
+        CSS color value for the swatch, e.g. ``"#ff0000"``, ``"red"``,
+        ``"rgba(255,0,0,0.5)"``.
+
+    Examples
+    --------
+    >>> LegendItem(label="High", color="#ff0000")
+    {'label': 'High', 'color': '#ff0000'}
+    """
+
     label: str
     color: str
 
 
 class LayerMetadata(TypedDict, total=False):
-    """图层元数据规范结构
-
-    所有栅格图层统一使用此结构声明元数据，避免行为漂移。
     """
+    Typed structure for raster layer metadata and legend captions.
+
+    All caption-enabled raster layers (``ImageOverlay``, ``VideoOverlay``,
+    ``TileLayer``, ``FloatImage``) accept this structure through their
+    ``caption`` parameter.  Pass either a plain ``dict`` with matching keys
+    or a ``LayerMetadata`` instance.
+
+    The Map maintains a single unified CaptionRegistry control: when
+    multiple layers are visible at once their metadata sections are
+    merged in order, and LayerControl toggles are automatically wired to
+    show/hide the corresponding section.
+
+    Parameters
+    ----------
+    title : str, optional
+        Short title shown in bold at the top of the section.
+    description : str, optional
+        One-paragraph description of the dataset.
+    unit : str, optional
+        Unit of measurement, e.g. ``"°C"``, ``"m/s"``, ``"kg/m³"``.
+    resolution : str, optional
+        Spatial or temporal resolution, e.g. ``"1km"``, ``"30m"``,
+        ``"daily"``.
+    source_url : str, optional
+        URL linking to the original data source.
+    source_text : str, optional
+        Human-readable label for ``source_url``; if omitted the URL
+        itself is displayed.
+    updated_time : str, optional
+        Free-form last-updated string, e.g. ``"2024-01-15"``.
+    copyright : str, optional
+        Copyright / attribution line rendered in small italic type.
+    legend : list of :class:`LegendItem`, optional
+        Color-bar legend.  Each entry must have at least the keys
+        ``"label"`` and ``"color"``.
+    position : str, default ``"bottomright"``
+        Leaflet control position.  One of ``"topleft"``, ``"topright"``,
+        ``"bottomleft"``, ``"bottomright"``.  Only the first registered
+        layer's position is used (Map-level singleton).
+    collapsible : bool, default ``True``
+        Whether the panel can be collapsed with a toggle button.
+        Only the first registered layer's value is used.
+    collapsed : bool, default ``False``
+        Whether the panel starts collapsed.
+        Only the first registered layer's value is used.
+
+    See Also
+    --------
+    folium.raster_layers.ImageOverlay
+    folium.raster_layers.VideoOverlay
+    folium.raster_layers.TileLayer
+    folium.plugins.FloatImage
+    normalize_layer_metadata : validation and defaults applied internally
+    """
+
     title: str
     description: str
     unit: str
@@ -395,96 +466,130 @@ _CAPTION_JS_TEMPLATE = """\
             return this._container;
         }},
 
-        _renderMetadata: function(meta) {{
-            var html = '';
-            if (!meta) return html;
+        _safeUrl: function(url) {{
+            if (!url || typeof url !== 'string') return null;
+            try {{
+                var parsed = new URL(url, window.location.href);
+                var allowed = ['http:', 'https:', 'ftp:', 'ftps:', 'mailto:'];
+                if (allowed.indexOf(parsed.protocol) === -1) return null;
+                return parsed.href;
+            }} catch (e) {{
+                return null;
+            }}
+        }},
 
-            if (meta.title) {{
-                html += '<div class="caption-title">' + meta.title + '</div>';
+        _safeColor: function(color) {{
+            if (!color || typeof color !== 'string') return null;
+            if (color.length > 200) return null;
+            if (/[\\x00-\\x1f<>]/.test(color)) return null;
+            var test = document.createElement('div');
+            test.style.backgroundColor = '';
+            test.style.backgroundColor = color;
+            if (test.style.backgroundColor === '') return null;
+            return test.style.backgroundColor;
+        }},
+
+        _appendText: function(parent, className, text) {{
+            if (!text) return;
+            var el = document.createElement('div');
+            if (className) el.className = className;
+            el.textContent = text;
+            parent.appendChild(el);
+        }},
+
+        _appendRow: function(parent, label, value, rowClass) {{
+            if (!value) return;
+            var row = document.createElement('div');
+            row.className = rowClass || 'caption-row';
+            if (label) {{
+                var labelSpan = document.createElement('span');
+                labelSpan.className = 'caption-label';
+                labelSpan.textContent = label;
+                row.appendChild(labelSpan);
+            }}
+            var valueSpan = document.createElement('span');
+            valueSpan.className = 'caption-value';
+            valueSpan.textContent = value;
+            row.appendChild(valueSpan);
+            parent.appendChild(row);
+        }},
+
+        _renderMetadata: function(meta, container) {{
+            if (!meta) return;
+
+            this._appendText(container, 'caption-title', meta.title);
+            this._appendText(container, 'caption-row caption-description', meta.description);
+
+            var hasMetaRow = meta.unit || meta.resolution || meta.updated_time;
+            if (hasMetaRow) {{
+                var metaRow = document.createElement('div');
+                metaRow.className = 'caption-row';
+                var parts = [];
+                if (meta.unit) parts.push('Unit: ' + meta.unit);
+                if (meta.resolution) parts.push('Resolution: ' + meta.resolution);
+                if (meta.updated_time) parts.push('Updated: ' + meta.updated_time);
+                metaRow.textContent = parts.join(' | ');
+                container.appendChild(metaRow);
             }}
 
-            if (meta.description) {{
-                html += '<div class="caption-row caption-description">' +
-                    meta.description + '</div>';
-            }}
-
-            if (meta.unit || meta.resolution || meta.updated_time) {{
-                var metaRows = [];
-                if (meta.unit) {{
-                    metaRows.push('<span class="caption-label">Unit:</span>' +
-                        '<span class="caption-value">' + meta.unit + '</span>');
-                }}
-                if (meta.resolution) {{
-                    metaRows.push('<span class="caption-label">Resolution:</span>' +
-                        '<span class="caption-value">' + meta.resolution + '</span>');
-                }}
-                if (meta.updated_time) {{
-                    metaRows.push('<span class="caption-label">Updated:</span>' +
-                        '<span class="caption-value">' + meta.updated_time + '</span>');
-                }}
-                html += '<div class="caption-row">' + metaRows.join(' | ') + '</div>';
-            }}
-
-            if (meta.source_url) {{
-                var sourceText = meta.source_text || meta.source_url;
-                html += '<div class="caption-row caption-source">' +
-                    '<span class="caption-label">Source:</span>' +
-                    '<a href="' + meta.source_url + '" target="_blank" rel="noopener">' +
-                    sourceText + '</a></div>';
+            var safeUrl = this._safeUrl(meta.source_url);
+            if (safeUrl) {{
+                var sourceRow = document.createElement('div');
+                sourceRow.className = 'caption-row caption-source';
+                var label = document.createElement('span');
+                label.className = 'caption-label';
+                label.textContent = 'Source:';
+                sourceRow.appendChild(label);
+                var link = document.createElement('a');
+                link.href = safeUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = meta.source_text || meta.source_url;
+                sourceRow.appendChild(link);
+                container.appendChild(sourceRow);
             }}
 
             if (meta.legend && meta.legend.length > 0) {{
-                var legendHtml = '<div class="caption-legend">';
+                var legendEl = document.createElement('div');
+                legendEl.className = 'caption-legend';
                 for (var i = 0; i < meta.legend.length; i++) {{
                     var item = meta.legend[i];
-                    legendHtml += '<div class="caption-legend-item">' +
-                        '<span class="caption-legend-color" style="background-color:' +
-                        item.color + '"></span>' +
-                        '<span class="caption-legend-label">' + item.label + '</span>' +
-                        '</div>';
+                    if (!item) continue;
+                    var itemEl = document.createElement('div');
+                    itemEl.className = 'caption-legend-item';
+                    var colorEl = document.createElement('span');
+                    colorEl.className = 'caption-legend-color';
+                    var safeColor = this._safeColor(item.color);
+                    if (safeColor) {{
+                        colorEl.style.backgroundColor = safeColor;
+                    }} else {{
+                        colorEl.style.backgroundColor = '#cccccc';
+                    }}
+                    itemEl.appendChild(colorEl);
+                    var labelEl = document.createElement('span');
+                    labelEl.className = 'caption-legend-label';
+                    labelEl.textContent = item.label || '';
+                    itemEl.appendChild(labelEl);
+                    legendEl.appendChild(itemEl);
                 }}
-                legendHtml += '</div>';
-                html += legendHtml;
+                container.appendChild(legendEl);
             }}
 
-            if (meta.copyright) {{
-                html += '<div class="caption-copyright">' +
-                    meta.copyright + '</div>';
-            }}
-
-            return html;
+            this._appendText(container, 'caption-copyright', meta.copyright);
         }},
 
         _buildContent: function() {{
-            var html = '';
-
-            if (this.options.collapsible) {{
-                html += '<span class="caption-toggle" title="Toggle">' +
-                    (this.options.collapsed ? '+' : '&minus;') + '</span>';
+            var container = this._container;
+            while (container.firstChild) {{
+                container.removeChild(container.firstChild);
             }}
 
-            html += '<div class="caption-body">';
-
-            if (this._visibleLayers.length === 0) {{
-                html += '<div class="caption-empty">No active layer metadata</div>';
-            }} else {{
-                for (var i = 0; i < this._visibleLayers.length; i++) {{
-                    var layerMeta = this._visibleLayers[i];
-                    var sectionClass = 'caption-section';
-                    if (i === this._visibleLayers.length - 1) {{
-                        sectionClass += ' last';
-                    }}
-                    html += '<div class="' + sectionClass + '">' +
-                        this._renderMetadata(layerMeta) + '</div>';
-                }}
-            }}
-
-            html += '</div>';
-
-            this._container.innerHTML = html;
-
             if (this.options.collapsible) {{
-                var toggle = this._container.querySelector('.caption-toggle');
+                var toggle = document.createElement('span');
+                toggle.className = 'caption-toggle';
+                toggle.title = 'Toggle';
+                toggle.textContent = this.options.collapsed ? '+' : '−';
+                container.appendChild(toggle);
                 var self = this;
                 L.DomEvent.on(toggle, 'click', function(e) {{
                     L.DomEvent.stopPropagation(e);
@@ -492,20 +597,44 @@ _CAPTION_JS_TEMPLATE = """\
                 }});
             }}
 
+            var body = document.createElement('div');
+            body.className = 'caption-body';
+
+            if (this._visibleLayers.length === 0) {{
+                var empty = document.createElement('div');
+                empty.className = 'caption-empty';
+                empty.textContent = 'No active layer metadata';
+                body.appendChild(empty);
+            }} else {{
+                for (var i = 0; i < this._visibleLayers.length; i++) {{
+                    var layerMeta = this._visibleLayers[i];
+                    var section = document.createElement('div');
+                    section.className = 'caption-section';
+                    if (i === this._visibleLayers.length - 1) {{
+                        section.className += ' last';
+                    }}
+                    this._renderMetadata(layerMeta, section);
+                    body.appendChild(section);
+                }}
+            }}
+
+            container.appendChild(body);
+
             if (this.options.collapsed) {{
-                L.DomUtil.addClass(this._container, 'caption-collapsed');
+                L.DomUtil.addClass(container, 'caption-collapsed');
             }}
         }},
 
         _toggle: function() {{
             var collapsed = L.DomUtil.hasClass(
                 this._container, 'caption-collapsed');
+            var toggle = this._container.querySelector('.caption-toggle');
             if (collapsed) {{
                 L.DomUtil.removeClass(this._container, 'caption-collapsed');
-                this._container.querySelector('.caption-toggle').innerHTML = '&minus;';
+                if (toggle) toggle.textContent = '−';
             }} else {{
                 L.DomUtil.addClass(this._container, 'caption-collapsed');
-                this._container.querySelector('.caption-toggle').innerHTML = '+';
+                if (toggle) toggle.textContent = '+';
             }}
         }},
 
@@ -599,10 +728,23 @@ _CAPTION_JS_TEMPLATE = """\
 
 
 class CaptionRegistry:
-    """Map 级元数据注册表（纯 Python 管理器，不参与渲染树）。
+    """
+    Internal implementation — Map-level metadata registry.
 
-    统一管理所有图层的 metadata，向 Figure 的 header/script
-    直接注入 CSS/JS，不依赖 Map 的 render 遍历时序。
+    .. warning::
+        This is a private implementation detail and **not part of the
+        public API**.  Users should only interact with captions via the
+        ``caption`` parameter on raster layer classes (see
+        :class:`LayerMetadata`).  The class name, constructor signature
+        and all attributes may change at any time without notice.
+
+    This is a pure-Python manager (not part of the branca render tree)
+    that collects metadata from every caption-enabled layer on a Map
+    and injects a single unified Leaflet control into the document's
+    ``<head>`` / ``<script>`` sections.  By writing to the Figure's
+    ``header`` and ``script`` Elements directly (rather than as
+    children of the Map) it avoids timing issues that would otherwise
+    cause ``add_child()`` registrations to be missed during render.
     """
 
     def __init__(
@@ -690,14 +832,35 @@ class CaptionRegistry:
 
 
 class CaptionMixin:
-    """Mixin class that adds caption/metadata support to raster layers.
+    """
+    Internal implementation — Mixin that wires up the Map-level
+    CaptionRegistry for raster layer classes.
 
-    图层只需注册 metadata 到 Map 级的 CaptionRegistry，
-    由统一的 CaptionControl 根据当前可见图层动态展示内容。
+    .. warning::
+        This is a private implementation detail and **not part of the
+        public API**.  Users should never subclass or directly
+        instantiate this mixin; they pass :class:`LayerMetadata`-style
+        dicts through each layer's ``caption`` argument instead.
 
-    注册时机通过两条显式路径保证：
-    - ``add_to()`` : 调用 ``super().add_to()`` 后，_parent 已就绪，立即注册
-    - ``render()`` : 兜底路径，覆盖 ``add_child()`` 等未经过 ``add_to`` 的场景
+    A layer opts in simply by::
+
+        class MyLayer(CaptionMixin, Layer):
+            def __init__(self, caption=None, show=True, ...):
+                ...
+                self._init_caption(caption, show=show)
+
+    Registration is triggered through two explicit, safe paths:
+
+    * ``add_to(parent)`` — immediately after the layer's ``_parent``
+      pointer is populated by ``super().add_to()``.
+    * ``render()`` — a fallback path so users who call
+      ``map.add_child(layer)`` instead of ``layer.add_to(map)`` still
+      get their caption registered in time.
+
+    Both paths eventually funnel through :meth:`_try_register`, which
+    walks the parent chain to find the :class:`folium.Map`, lazily
+    creates the :class:`CaptionRegistry` on it, and hands over the
+    normalized metadata.
     """
 
     def _init_caption(

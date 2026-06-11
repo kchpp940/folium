@@ -41,7 +41,13 @@ from folium.map import (
     Popup,
     Tooltip,
 )
-from folium.raster_layers import TileLayer, WmsTileLayer
+from folium.raster_layers import (
+    LayerMetadata,
+    LegendItem,
+    TileLayer,
+    WmsTileLayer,
+    normalize_layer_metadata,
+)
 from folium.utilities import JsCode
 from folium.vector_layers import Circle, CircleMarker, Polygon, PolyLine, Rectangle
 
@@ -90,6 +96,8 @@ __all__ = [
     "LatLngPopup",
     "LayerControl",
     "LayerGroup",
+    "LayerMetadata",
+    "LegendItem",
     "LinearColormap",
     "Link",
     "MacroElement",
@@ -104,6 +112,7 @@ __all__ = [
     "Vega",
     "VegaLite",
     "WmsTileLayer",
+    "normalize_layer_metadata",
     # vector_layers
     "Circle",
     "CircleMarker",

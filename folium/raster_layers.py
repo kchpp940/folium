@@ -7,7 +7,12 @@ from typing import Any, Callable, Optional, Union
 
 import xyzservices
 
-from folium.elements import CaptionMixin, LayerMetadata
+from folium.elements import (
+    CaptionMixin,
+    LayerMetadata,
+    LegendItem,
+    normalize_layer_metadata,
+)
 from folium.map import Layer
 from folium.template import Template
 from folium.utilities import (
@@ -20,6 +25,16 @@ from folium.utilities import (
     parse_options,
     remove_empty,
 )
+
+__all__ = [
+    "ImageOverlay",
+    "LayerMetadata",
+    "LegendItem",
+    "TileLayer",
+    "VideoOverlay",
+    "WmsTileLayer",
+    "normalize_layer_metadata",
+]
 
 
 class TileLayer(CaptionMixin, Layer):
@@ -75,10 +90,20 @@ class TileLayer(CaptionMixin, Layer):
         services).
     opacity: float, default 1
         Sets the opacity for the layer.
-    caption: dict, optional
-        Metadata and legend caption for the tile layer.
-        See ImageOverlay for the full list of supported keys.
-        Parameter accepts both LayerMetadata TypedDict or plain dict.
+    caption: LayerMetadata or dict, optional
+        Metadata and legend caption displayed for this tile layer in the
+        Map-level unified Caption panel.  Accepts either a plain ``dict``
+        with the keys documented in :class:`folium.LayerMetadata` or a
+        :class:`folium.LayerMetadata` TypedDict instance.
+
+        When multiple caption-enabled layers are visible at once, their
+        metadata sections are merged in a single panel (in the order the
+        layers were added) and automatically shown/hidden when toggled
+        via :class:`folium.LayerControl`.
+
+        The Map-level singleton control reads ``position``,
+        ``collapsible`` and ``collapsed`` only from the **first**
+        registered layer; subsequent layers ignore these keys.
     **kwargs : additional keyword arguments
         Other keyword arguments are passed as options to the Leaflet tileLayer
         object.
@@ -282,26 +307,39 @@ class ImageOverlay(CaptionMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    caption: dict or LayerMetadata, optional
-        Metadata and legend caption for the image layer.
-        Supports the following keys:
+    caption: LayerMetadata or dict, optional
+        Metadata and legend caption displayed for this image layer in the
+        Map-level unified Caption panel.  Accepts either a plain ``dict``
+        with the keys documented in :class:`folium.LayerMetadata` or a
+        :class:`folium.LayerMetadata` TypedDict instance.
 
-        - title: str, title of the layer
-        - description: str, detailed description
-        - unit: str, unit of measurement (e.g., '°C', 'm/s')
-        - resolution: str, spatial resolution (e.g., '1km', '30m')
-        - source_url: str, URL to the data source
-        - source_text: str, display text for the source link
-        - updated_time: str, last update time
-        - copyright: str, copyright information
-        - legend: list of dicts with 'label' and 'color' keys
-        - collapsible: bool, whether the panel is collapsible (default True)
-        - collapsed: bool, whether initially collapsed (default False)
-        - position: str, control position (default 'bottomright')
+        Supported ``caption`` keys:
 
-        Multiple layers' metadata will be merged into a single unified
-        panel managed by the Map-level CaptionRegistry.
-        Parameter accepts both LayerMetadata TypedDict or plain dict.
+        - **title** (*str*) – bold section heading.
+        - **description** (*str*) – free-form description.
+        - **unit** (*str*) – measurement unit, e.g. ``"°C"``, ``"m/s"``.
+        - **resolution** (*str*) – spatial / temporal resolution.
+        - **source_url** (*str*) – link to original dataset.
+        - **source_text** (*str*) – display label for ``source_url``.
+        - **updated_time** (*str*) – last-updated timestamp string.
+        - **copyright** (*str*) – small italic attribution line.
+        - **legend** (*list of dict*) – color-bar entries; each dict needs
+          at least ``"label"`` and ``"color"`` keys.
+        - **position** (*str*) – Leaflet control position, one of
+          ``"topleft"``, ``"topright"``, ``"bottomleft"``, ``"bottomright"``
+          (default ``"bottomright"``).  **Only the first registered layer's
+          value is used** (Map-level singleton).
+        - **collapsible** (*bool*, default ``True``) – whether the panel
+          shows a toggle button.  Only the first registered layer's value
+          is used.
+        - **collapsed** (*bool*, default ``False``) – whether the panel
+          starts collapsed.  Only the first registered layer's value is
+          used.
+
+        When multiple caption-enabled layers are visible at once, their
+        metadata sections are merged in a single panel (in the order the
+        layers were added) and automatically shown/hidden when toggled
+        via :class:`folium.LayerControl`.
 
     See https://leafletjs.com/reference.html#imageoverlay for more
     options.
@@ -392,10 +430,14 @@ class VideoOverlay(CaptionMixin, Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
-    caption: dict or LayerMetadata, optional
-        Metadata and legend caption for the video layer.
-        See ImageOverlay for the full list of supported keys.
-        Parameter accepts both LayerMetadata TypedDict or plain dict.
+    caption: LayerMetadata or dict, optional
+        Metadata and legend caption displayed for this video layer in the
+        Map-level unified Caption panel.  Accepts either a plain ``dict``
+        with the keys documented in :class:`folium.LayerMetadata` or a
+        :class:`folium.LayerMetadata` TypedDict instance.
+
+        See :class:`folium.raster_layers.ImageOverlay` for the full list of
+        supported ``caption`` keys and the multi-layer merge rules.
     **kwargs:
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#videooverlay
