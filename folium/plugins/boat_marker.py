@@ -53,6 +53,13 @@ class BoatMarker(JSCSSMixin, Marker):
             version=None,
             kind="plugin",
             legacy=True,
+            legacy_reason=(
+                "Historical copy-paste from MarkerCluster: the resource name "
+                "should be 'boatmarkerjs' but renaming would break callers who "
+                "rely on add_js_link('markerclusterjs', ...) to override this "
+                "asset.  Canonical owner of the name 'markerclusterjs' is "
+                "MarkerCluster."
+            ),
         ),
     ]
     default_js, default_css = build_defaults(resources)

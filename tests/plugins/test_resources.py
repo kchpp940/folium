@@ -97,6 +97,36 @@ class TestValidateResource:
         r = Resource(name="a", url="http://x", type="js")
         assert r.legacy is False
 
+    def test_legacy_reason_required_when_legacy_true(self):
+        with pytest.raises(ValueError, match="legacy_reason.*required"):
+            r = Resource(name="a", url="http://x", type="js")
+            object.__setattr__(r, "legacy", True)
+            object.__setattr__(r, "legacy_reason", None)
+            validate_resource(r)
+
+    def test_legacy_reason_empty_rejected(self):
+        with pytest.raises(ValueError, match="legacy_reason.*non-empty"):
+            r = Resource(name="a", url="http://x", type="js")
+            object.__setattr__(r, "legacy", True)
+            object.__setattr__(r, "legacy_reason", "")
+            validate_resource(r)
+
+    def test_legacy_reason_not_str_rejected(self):
+        with pytest.raises(TypeError, match="legacy_reason.*must be str"):
+            r = Resource(name="a", url="http://x", type="js")
+            object.__setattr__(r, "legacy", True)
+            object.__setattr__(r, "legacy_reason", 42)
+            validate_resource(r)
+
+    def test_legacy_reason_nonlegacy_accepts_none(self):
+        validate_resource(Resource(name="a", url="http://x", type="js", legacy_reason=None))
+
+    def test_legacy_reason_valid_string(self):
+        r = Resource(name="a", url="http://x", type="js")
+        object.__setattr__(r, "legacy", True)
+        object.__setattr__(r, "legacy_reason", "historical name from copy-paste")
+        validate_resource(r)
+
 
 class TestValidateResourceList:
     def test_duplicate_name(self):
@@ -268,20 +298,54 @@ class TestAuditAllResources:
         assert w003[0].severity == "warning"
         assert "moment" in w003[0].message
 
-    def test_w004_legacy_demotes_name_collision_to_warning(self):
+    def _make_legacy_resource(self, name, url, rtype, reason):
+        r = Resource(name=name, url=url, type=rtype)
+        object.__setattr__(r, "legacy", True)
+        object.__setattr__(r, "legacy_reason", reason)
+        return r
+
+    def test_w004_legacy_with_single_owner_demotes_to_warning(self):
+        """BoatMarker (legacy+reason) vs MarkerCluster (owner, non-legacy): 1 non-legacy → W004."""
         registry = {
-            "PluginA": [Resource(name="same", url="http://one", type="js")],
-            "PluginB": [Resource(name="same", url="http://two", type="js", legacy=True)],
+            "MarkerCluster": [Resource(name="markerclusterjs", url="http://cluster.js", type="js")],
+            "BoatMarker": [
+                self._make_legacy_resource(
+                    "markerclusterjs", "http://boat.js", "js",
+                    "historical copy-paste, keep for add_js_link compat",
+                )
+            ],
         }
         issues = audit_all_resources(registry)
         e001 = [i for i in issues if i.code == "E001"]
         w004 = [i for i in issues if i.code == "W004"]
-        assert e001 == [], "Presence of legacy flag should demote E001 → W004"
+        assert e001 == [], "Exactly 1 non-legacy owner with a legacy partner → W004, not E001"
         assert len(w004) == 1
         assert w004[0].severity == "warning"
-        assert "legacy" in w004[0].message
+        assert w004[0].details["non_legacy_count"] == 1
 
-    def test_e001_persists_without_legacy(self):
+    def test_e001_third_party_new_conflict_still_errors(self):
+        """BoatMarker (legacy) + MarkerCluster (owner) + UnrelatedPlugin (new misuse): 2 non-legacy → E001."""
+        registry = {
+            "MarkerCluster": [Resource(name="markerclusterjs", url="http://cluster.js", type="js")],
+            "BoatMarker": [
+                self._make_legacy_resource(
+                    "markerclusterjs", "http://boat.js", "js",
+                    "historical copy-paste, keep for add_js_link compat",
+                )
+            ],
+            "UnrelatedPlugin": [Resource(name="markerclusterjs", url="http://other.js", type="js")],
+        }
+        issues = audit_all_resources(registry)
+        e001 = [i for i in issues if i.code == "E001"]
+        w004 = [i for i in issues if i.code == "W004"]
+        assert w004 == [], "2 non-legacy participants → legacy allowlist must NOT cover"
+        assert len(e001) == 1
+        assert e001[0].severity == "error"
+        assert e001[0].details["non_legacy_count"] == 2
+        assert "UnrelatedPlugin" in e001[0].details["plugins"]
+
+    def test_e001_persists_without_any_legacy(self):
+        """No legacy flags at all, two plugins with different URLs → E001."""
         registry = {
             "PluginA": [Resource(name="same", url="http://one", type="js")],
             "PluginB": [Resource(name="same", url="http://two", type="js")],
@@ -291,6 +355,25 @@ class TestAuditAllResources:
         w004 = [i for i in issues if i.code == "W004"]
         assert len(e001) == 1
         assert e001[0].severity == "error"
+        assert e001[0].details["non_legacy_count"] == 2
+        assert w004 == []
+
+    def test_e001_when_legacy_missing_reason(self):
+        """If a legacy entry lacks a reason, the allowlist is invalid → E001."""
+        r_legacy_no_reason = Resource(name="same", url="http://two", type="js")
+        object.__setattr__(r_legacy_no_reason, "legacy", True)
+        object.__setattr__(r_legacy_no_reason, "legacy_reason", None)
+        registry = {
+            "PluginA": [Resource(name="same", url="http://one", type="js")],
+            "PluginB": [r_legacy_no_reason],
+        }
+        issues = audit_all_resources(registry)
+        e001 = [i for i in issues if i.code == "E001"]
+        w004 = [i for i in issues if i.code == "W004"]
+        assert e001, (
+            "A legacy entry without a reason should fail the all_reasoned "
+            "check and stay as E001."
+        )
         assert w004 == []
 
     def test_no_issues(self):

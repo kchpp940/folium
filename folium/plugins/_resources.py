@@ -73,14 +73,30 @@ class Resource:
         other even though they live in different files.
     legacy : bool, default False
         Flag this resource as having a historically-constrained ``name``
-        that cannot be changed for backward compatibility.  When a
-        cross-plugin name conflict (E001) involves *only* resources
-        flagged ``legacy=True``, the audit demotes it from error to
-        warning (W004) so the conflict remains visible but does not
-        block audits.  Example: ``BoatMarker`` inherits its resource
-        name from an old copy-paste of ``MarkerCluster``; changing the
-        name would break callers who rely on ``add_js_link()`` with
-        that key.
+        that cannot be changed for backward compatibility.  When
+        ``legacy=True``, ``legacy_reason`` is required.
+
+        The audit uses *precise allowlisting*: a cross-plugin name
+        collision with different URLs (E001) is demoted to warning
+        (W004) **only if** every mis-named participant (i.e. every
+        plugin except the single canonical owner of the resource name)
+        is flagged ``legacy=True`` with a non-empty ``legacy_reason``.
+        If a third *unrelated* plugin picks up the same name by
+        accident, it will not be protected by an existing legacy
+        flag and the conflict remains an error.
+
+        Example: ``BoatMarker`` accidentally carries the resource name
+        ``"markerclusterjs"`` from an old copy-paste of ``MarkerCluster``;
+        renaming it would break callers who rely on ``add_js_link()``
+        with that key, so BoatMarker sets ``legacy=True`` and supplies
+        a ``legacy_reason``.  A third plugin that later reuses
+        ``"markerclusterjs"`` by mistake is **not** protected and
+        still triggers E001.
+    legacy_reason : str, optional
+        Human-readable explanation of *why* this resource carries a
+        legacy name, including the canonical owner plugin and the
+        reason the name cannot be fixed.  Required when ``legacy=True``;
+        must be a non-empty string.
     """
 
     name: str
@@ -92,6 +108,7 @@ class Resource:
     kind: Optional[Literal["plugin", "dependency"]] = None
     order: Optional[int] = None
     legacy: bool = False
+    legacy_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +170,30 @@ def validate_resource(r: Resource, *, plugin_hint: Optional[str] = None) -> None
             f"Resource '{r.name}': 'legacy' must be bool, got "
             f"{type(r.legacy).__name__}."
         )
+
+    # -- legacy_reason: if legacy=True, must be non-empty str ----------------
+    if r.legacy:
+        if r.legacy_reason is None:
+            raise ValueError(
+                f"Resource '{r.name}': 'legacy_reason' is required when "
+                f"legacy=True; please document why this historical name "
+                f"cannot be changed."
+            )
+        if not isinstance(r.legacy_reason, str):
+            raise TypeError(
+                f"Resource '{r.name}': 'legacy_reason' must be str, got "
+                f"{type(r.legacy_reason).__name__}."
+            )
+        if not r.legacy_reason:
+            raise ValueError(
+                f"Resource '{r.name}': 'legacy_reason' must be non-empty."
+            )
+    else:
+        if r.legacy_reason is not None and not isinstance(r.legacy_reason, str):
+            raise TypeError(
+                f"Resource '{r.name}': 'legacy_reason' must be str or None, "
+                f"got {type(r.legacy_reason).__name__}."
+            )
 
 
 def validate_resource_list(
@@ -383,6 +424,11 @@ def collect_plugin_resources() -> dict[str, list[Resource]]:
 
     Notes
     -----
+    Only classes that declare ``resources`` *in their own ``__dict__`` (i.e. not
+    merely inherited from a parent) are registered.  Subclasses such as
+    ``FastMarkerCluster`` that simply reuse their parent's resources are
+    intentionally skipped – their resources are audited via the parent entry.
+
     Calling this function multiple times is safe only after
     :func:`clear_registry`; otherwise already-registered plugins will
     raise ``ValueError``.
@@ -402,7 +448,9 @@ def collect_plugin_resources() -> dict[str, list[Resource]]:
             continue
         if not issubclass(obj, JSCSSMixin):
             continue
-        res = getattr(obj, "resources", None)
+        if "resources" not in obj.__dict__:
+            continue
+        res = obj.__dict__["resources"]
         if res is None:
             continue
         if not all(isinstance(r, Resource) for r in res):
@@ -430,16 +478,18 @@ def audit_all_resources(
     Checks performed:
 
     1. **E001 — cross-plugin name collision with different URLs**: the same
-       ``name + type`` pair is used by different plugins but with different
-       URLs AND *none* of the involved resources is flagged ``legacy=True``.
-       The second plugin to render will silently overwrite the first with a
-       *different* script/stylesheet — a genuine bug.
+       ``name + type`` pair is used by different plugins with different
+       URLs and the conflict set contains **two or more participants that
+       are NOT flagged legacy=True**.  This means a *third, unrelated*
+       plugin has picked up the same historical name by accident – a
+       genuine bug that the existing legacy allowlist must not cover.
     2. **W004 — legacy name collision with different URLs**: same as E001
-       but *at least one* resource in the conflict set is flagged
-       ``legacy=True``.  This demotes the problem from error to warning
-       so audits remain actionable on real regressions while explicitly
-       allowlisted historical names are tolerated for backward
-       compatibility.
+       but the conflict set contains at most one non-legacy participant
+       (treated as the canonical owner of the resource name) and every
+       other conflicting resource is flagged ``legacy=True`` with a
+       non-empty ``legacy_reason``.  The problem is still reported as a
+       warning so maintainers see the collision, but it does not block
+       audits.
     3. **E002 — same package, different versions**: a package name
        appears with two different ``version`` strings.  This is almost
        always a bug (e.g. one plugin pins ``moment@2.18.1`` while
@@ -503,8 +553,12 @@ def audit_all_resources(
         urls = name_type_to_urls[(name, rtype)]
         if len(urls) > 1:
             entries = name_type_to_entries[(name, rtype)]
-            any_legacy = any(r.legacy for _, r in entries)
-            if any_legacy:
+            non_legacy_count = sum(1 for _, r in entries if not r.legacy)
+            all_reasoned = all(
+                (not r.legacy) or (r.legacy_reason and r.legacy_reason.strip())
+                for _, r in entries
+            )
+            if non_legacy_count <= 1 and all_reasoned:
                 issues.append(
                     AuditIssue(
                         severity="warning",
@@ -512,16 +566,19 @@ def audit_all_resources(
                         message=(
                             f"Resource name {name!r} (type={rtype!r}) is "
                             f"declared by multiple plugins {plugins} with "
-                            f"DIFFERENT URLs {sorted(urls)}.  At least one "
-                            f"participating resource is flagged legacy=True, "
-                            f"so this collision is tolerated for backward "
-                            f"compatibility.  Remove all legacy flags to "
-                            f"re-promote to an error."
+                            f"DIFFERENT URLs {sorted(urls)}.  The conflict "
+                            f"contains {non_legacy_count} non-legacy "
+                            f"participant(s) and every legacy entry carries "
+                            f"a reason – allowlisted for backward "
+                            f"compatibility.  A *second* non-legacy plugin "
+                            f"joining the collision would re-promote this "
+                            f"to an error."
                         ),
                         details={
                             "name": name, "type": rtype,
                             "plugins": plugins,
                             "urls": sorted(urls),
+                            "non_legacy_count": non_legacy_count,
                         },
                     )
                 )
@@ -533,14 +590,19 @@ def audit_all_resources(
                         message=(
                             f"Resource name {name!r} (type={rtype!r}) is "
                             f"declared by multiple plugins {plugins} with "
-                            f"DIFFERENT URLs {sorted(urls)}.  The second "
-                            f"plugin to render will silently overwrite the "
-                            f"first with a different script."
+                            f"DIFFERENT URLs {sorted(urls)}.  The conflict "
+                            f"set contains {non_legacy_count} non-legacy "
+                            f"participant(s) – more than the single "
+                            f"canonical owner permitted by the legacy "
+                            f"allowlist.  The second plugin to render will "
+                            f"silently overwrite the first with a "
+                            f"different script."
                         ),
                         details={
                             "name": name, "type": rtype,
                             "plugins": plugins,
                             "urls": sorted(urls),
+                            "non_legacy_count": non_legacy_count,
                         },
                     )
                 )
