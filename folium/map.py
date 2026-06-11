@@ -351,23 +351,43 @@ class LayerControl(MacroElement):
                     {%- endfor %}
                 },
             };
+
+            {%- for layer in this._base_layer_objs + this._overlay_layer_objs %}
+            {{ layer.get_name() }}._folium = {
+                controlDisabled: {{ 'true' if layer.control_disabled else 'false' }},
+                controlCollapsed: {{ 'true' if layer.control_collapsed else 'false' }}
+            };
+            {%- endfor %}
+
             let {{ this.get_name() }} = L.control.layers(
                 {{ this.get_name() }}_layers.base_layers,
                 {{ this.get_name() }}_layers.overlays,
                 {{ this.options|tojavascript }}
             ).addTo({{this._parent.get_name()}});
 
-            {%- if this.disabled_layers %}
+            {%- if this._has_disabled %}
             (function (ctl) {
                 var container = ctl.getContainer();
-                var inputs = container.querySelectorAll('input');
-                var labels = container.querySelectorAll('label');
-                var disabled = {{ this.disabled_layers|tojson }};
-                inputs.forEach(function (inp, i) {
-                    if (disabled.indexOf(inp.nextSibling.textContent.trim()) !== -1) {
-                        inp.disabled = true;
-                        if (labels[i]) labels[i].style.opacity = '0.5';
+                var baseInputs = container.querySelectorAll(
+                    '.leaflet-control-layers-base input');
+                var overlayInputs = container.querySelectorAll(
+                    '.leaflet-control-layers-overlays input');
+
+                var baseIdx = 0, overlayIdx = 0;
+                ctl._layers.forEach(function (entry) {
+                    if (!entry.layer._folium || !entry.layer._folium.controlDisabled) {
+                        if (entry.overlay) overlayIdx++; else baseIdx++;
+                        return;
                     }
+                    var inputs = entry.overlay ? overlayInputs : baseInputs;
+                    var idx = entry.overlay ? overlayIdx : baseIdx;
+                    if (inputs[idx]) {
+                        inputs[idx].disabled = true;
+                        var label = inputs[idx].closest('label')
+                                  || inputs[idx].parentElement;
+                        if (label) label.style.opacity = '0.5';
+                    }
+                    if (entry.overlay) overlayIdx++; else baseIdx++;
                 });
             })({{ this.get_name() }});
             {%- endif %}
@@ -390,20 +410,28 @@ class LayerControl(MacroElement):
     ):
         super().__init__()
         self._name = "LayerControl"
+        # Note: we do our own sorting in Python, so Leaflet's native
+        # sortLayers is always disabled.  The user-facing ``sortLayers``
+        # argument controls whether we apply the unified control_order
+        # sorting logic.
         self.options = remove_empty(
             position=position, collapsed=collapsed, autoZIndex=autoZIndex,
-            sortLayers=sortLayers, **kwargs,
+            sortLayers=False, **kwargs,
         )
         self.draggable = draggable
         self.sort_layers = sortLayers
         self.base_layers: OrderedDict[str, str] = OrderedDict()
         self.overlays: OrderedDict[str, str] = OrderedDict()
-        self.disabled_layers: list[str] = []
+        self._base_layer_objs: list = []
+        self._overlay_layer_objs: list = []
+        self._has_disabled: bool = False
 
     def reset(self) -> None:
         self.base_layers = OrderedDict()
         self.overlays = OrderedDict()
-        self.disabled_layers = []
+        self._base_layer_objs = []
+        self._overlay_layer_objs = []
+        self._has_disabled = False
 
     def render(self, **kwargs):
         """Renders the HTML representation of the element."""
@@ -424,14 +452,17 @@ class LayerControl(MacroElement):
             deduplicate_layer_names(base_list)
             deduplicate_layer_names(overlay_list)
 
+        self._base_layer_objs = base_list
+        self._overlay_layer_objs = overlay_list
+
         for layer in base_list:
             self.base_layers[layer.layer_name] = layer.get_name()
             if layer.control_disabled:
-                self.disabled_layers.append(layer.layer_name)
+                self._has_disabled = True
         for layer in overlay_list:
             self.overlays[layer.layer_name] = layer.get_name()
             if layer.control_disabled:
-                self.disabled_layers.append(layer.layer_name)
+                self._has_disabled = True
         super().render()
 
 

@@ -60,7 +60,14 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this,kwargs) %}
 
-            L.control.groupedLayers(
+            {%- for layer in this._all_layer_objs %}
+            {{ layer.get_name() }}._folium = {
+                controlDisabled: {{ 'true' if layer.control_disabled else 'false' }},
+                controlCollapsed: {{ 'true' if layer.control_collapsed else 'false' }}
+            };
+            {%- endfor %}
+
+            var {{ this.get_name() }} = L.control.groupedLayers(
                 null,
                 {
                     {%- for group_name, overlays in this.grouped_overlays.items() %}
@@ -78,20 +85,40 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             {{ val }}.remove();
             {%- endfor %}
 
-            {%- if this.disabled_layers %}
-            (function () {
-                var sel = 'input[name^="leaflet-base-layers"], ' +
-                          'input[name^="leaflet-overlay-layers"]';
-                document.querySelectorAll(sel).forEach(function (inp) {
-                    var label = inp.parentElement;
-                    if (!label) return;
-                    var txt = (label.innerText || label.textContent || '').trim();
-                    if ({{ this.disabled_layers|tojson }}.indexOf(txt) !== -1) {
-                        inp.disabled = true;
-                        label.style.opacity = '0.5';
+            {%- if this._has_disabled %}
+            (function (ctl) {
+                var container = ctl.getContainer();
+                var inputs = container.querySelectorAll(
+                    '.leaflet-control-layers-overlays input');
+                var overlayIdx = 0;
+                ctl._layers.forEach(function (entry) {
+                    if (!entry.overlay) return;
+                    if (entry.layer._folium && entry.layer._folium.controlDisabled) {
+                        if (inputs[overlayIdx]) {
+                            inputs[overlayIdx].disabled = true;
+                            var label = inputs[overlayIdx].closest('label')
+                                      || inputs[overlayIdx].parentElement;
+                            if (label) label.style.opacity = '0.5';
+                        }
+                    }
+                    overlayIdx++;
+                });
+            })({{ this.get_name() }});
+            {%- endif %}
+
+            {%- if this._collapsed_groups %}
+            (function (ctl) {
+                var container = ctl.getContainer();
+                var groups = container.querySelectorAll(
+                    '.leaflet-control-layers-group');
+                {{ this._collapsed_groups|tojson }}.forEach(function (idx) {
+                    if (groups[idx]) {
+                        var nameEl = groups[idx].querySelector(
+                            '.leaflet-control-layers-group-name');
+                        if (nameEl) nameEl.click();
                     }
                 });
-            })();
+            })({{ this.get_name() }});
             {%- endif %}
 
         {% endmacro %}
@@ -103,18 +130,25 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         exclusive_groups=True,
         sort_groups=True,
         sort_layers=True,
+        group_collapsing=None,
         **kwargs,
     ):
         super().__init__()
         self._name = "GroupedLayerControl"
         self.options = remove_empty(**kwargs)
+        # Sorting is done entirely on the Python side; the plugin's
+        # native sortLayers would just alphabetise again.
+        self.options["sortLayers"] = False
         self._explicit_groups = groups or {}
         self._exclusive = exclusive_groups
         self._sort_groups = sort_groups
         self._sort_layers = sort_layers
+        self._group_collapsing = group_collapsing
         self.layers_untoggle: set[str] = set()
         self.grouped_overlays: "OrderedDict[str, OrderedDict[str, str]]" = OrderedDict()
-        self.disabled_layers: list[str] = []
+        self._all_layer_objs: list = []
+        self._has_disabled: bool = False
+        self._collapsed_groups: list[int] = []
         # Pre-register the explicit group order in exclusiveGroups.
         if exclusive_groups and self._explicit_groups:
             self.options["exclusiveGroups"] = list(self._explicit_groups.keys())
@@ -165,7 +199,9 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         # 5. Convert layer objects → JS names; dedupe; record untoggles.
         self.grouped_overlays = OrderedDict()
         self.layers_untoggle = set()
-        self.disabled_layers = []
+        self._all_layer_objs = []
+        self._has_disabled = False
+        self._collapsed_groups = []
 
         all_names_seen: dict[str, int] = {}
 
@@ -177,9 +213,11 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
             return preferred
 
         exclusive_seen_first: dict[str, bool] = {}
+        group_has_collapsed: dict[str, bool] = {}
 
         for group_name, inner in structured.items():
             self.grouped_overlays[group_name] = OrderedDict()
+            group_has_collapsed[group_name] = False
             for layer_label, layer in inner.items():
                 # make sure the elements used in GroupedLayerControl
                 # don't show up in the regular LayerControl.
@@ -187,9 +225,12 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
 
                 final_label = unique_name(layer_label)
                 self.grouped_overlays[group_name][final_label] = layer.get_name()
+                self._all_layer_objs.append(layer)
 
                 if layer.control_disabled:
-                    self.disabled_layers.append(final_label)
+                    self._has_disabled = True
+                if layer.control_collapsed:
+                    group_has_collapsed[group_name] = True
 
                 is_first_in_exclusive = self._exclusive and not exclusive_seen_first.get(
                     group_name, False
@@ -202,6 +243,18 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
                     if not is_first_in_exclusive:
                         # Only enable the first radio button; others must be off.
                         self.layers_untoggle.add(layer.get_name())
+
+        # Determine which group indices should be collapsed by default.
+        for idx, group_name in enumerate(self.grouped_overlays.keys()):
+            if group_has_collapsed.get(group_name, False):
+                self._collapsed_groups.append(idx)
+
+        # Auto-enable groupCollapsing if any group is collapsed, or if
+        # the user explicitly set the option.
+        if self._group_collapsing is not None:
+            self.options["groupCollapsing"] = bool(self._group_collapsing)
+        elif self._collapsed_groups:
+            self.options["groupCollapsing"] = True
 
         if self._exclusive:
             self.options["exclusiveGroups"] = list(self.grouped_overlays.keys())

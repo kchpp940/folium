@@ -34,7 +34,7 @@ def test_grouped_layer_control():
                     "g2" : {fg2.get_name()},
                 }},
             }},
-            {{"exclusiveGroups": ["groups1",],}},
+            {{"sortLayers": false,"exclusiveGroups": ["groups1",],}},
          ).addTo({m.get_name()});
          {fg2.get_name()}.remove();
     """)

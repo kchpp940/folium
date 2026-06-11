@@ -274,12 +274,19 @@ def build_tree(
     for layer in layers:
         path = list(layer.control_group) if layer.control_group else []
         parent = _ensure_path(root, path) if path else root
-        parent.layer = layer
-        parent.collapsed = bool(layer.control_collapsed)
-        parent.disabled = bool(layer.control_disabled)
+        # The leaf node is named after the layer itself (layer.layer_name),
+        # not the last path segment.  control_group defines the ancestor
+        # path (groups), and the layer is a leaf under that path.
+        leaf_label = layer.layer_name
+        if leaf_label not in parent.children:
+            parent.children[leaf_label] = _TreeNode(leaf_label)
+        leaf = parent.children[leaf_label]
+        leaf.layer = layer
+        leaf.collapsed = bool(layer.control_collapsed)
+        leaf.disabled = bool(layer.control_disabled)
         if layer.control_order is not None:
-            parent.control_order = layer.control_order
-        parent.insertion_idx = getattr(layer, "_lc_insertion_idx", 0)
+            leaf.control_order = layer.control_order
+        leaf.insertion_idx = getattr(layer, "_lc_insertion_idx", 0)
 
     # 2. Merge user-supplied skeleton.
     if explicit_tree:
@@ -321,6 +328,8 @@ def _merge_explicit_tree(root: _TreeNode, explicit: Union[dict, list]) -> None:
     # Carry over user-declared attributes.
     if "collapsed" in explicit:
         node.collapsed = bool(explicit["collapsed"])
+    if "disabled" in explicit:
+        node.disabled = bool(explicit["disabled"])
     if "selectAllCheckbox" in explicit:
         node.select_all = explicit["selectAllCheckbox"]
     # The user may already have given a layer.
@@ -361,10 +370,12 @@ def _tree_node_to_dict(node: _TreeNode) -> dict:
     if node.select_all is not False:
         d["selectAllCheckbox"] = node.select_all
     if node.disabled:
-        # The tree plugin does not natively support "disabled"; we carry
-        # the flag so downstream rendering (or a user's custom hook) can
-        # honour it.  It is stripped out before serialising.
-        d["_disabled"] = True
+        # Encode the disabled flag directly into the label HTML so the
+        # DOM element can be located precisely by CSS selector without
+        # any text matching.  The tree plugin accepts HTML in labels.
+        d["label"] = (
+            f'<span data-folium-disabled="true">{node.label}</span>'
+        )
     if node.children:
         d["children"] = [_tree_node_to_dict(c) for c in node.children.values()]
     return d

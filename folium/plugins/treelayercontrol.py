@@ -130,17 +130,15 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
                 {{this.options|tojavascript}}
             ).addTo({{this._parent.get_name()}});
 
-            {%- if this.disabled_layers %}
+            {%- if this._has_disabled %}
             (function () {
-                var sel = '.leaflet-control-layers-list label';
-                var disabled = {{ this.disabled_layers|tojson }};
-                document.querySelectorAll(sel).forEach(function (lbl) {
-                    var txt = (lbl.innerText || lbl.textContent || '').trim();
-                    if (disabled.indexOf(txt) !== -1) {
-                        var inp = lbl.querySelector('input');
-                        if (inp) inp.disabled = true;
-                        lbl.style.opacity = '0.5';
-                    }
+                document.querySelectorAll('[data-folium-disabled="true"]')
+                    .forEach(function (span) {
+                    var label = span.closest('label');
+                    if (!label) return;
+                    var inp = label.querySelector('input');
+                    if (inp) inp.disabled = true;
+                    label.style.opacity = '0.5';
                 });
             })();
             {%- endif %}
@@ -178,7 +176,7 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         self._auto_build = auto_build
         self.base_tree = base_tree
         self.overlay_tree = overlay_tree
-        self.disabled_layers: list[str] = []
+        self._has_disabled: bool = False
 
     def render(self, **kwargs):
         from folium.layer_control_utils import (
@@ -189,7 +187,7 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
             strip_tree_plugin_flags,
         )
 
-        self.disabled_layers = []
+        self._has_disabled = False
 
         if self._auto_build:
             # Collect base / overlay layers from the parent map.
@@ -200,16 +198,11 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
             base_layers = sort_layers(base_layers)
             overlay_layers = sort_layers(overlay_layers)
 
-            # Record disabled labels for post-processing in JS.
-            def collect_disabled(layers):
-                disabled = []
-                for layer in layers:
-                    if layer.control_disabled:
-                        disabled.append(layer.layer_name)
-                return disabled
-
-            self.disabled_layers.extend(collect_disabled(base_layers))
-            self.disabled_layers.extend(collect_disabled(overlay_layers))
+            # Check whether any layer is disabled (for the JS guard).
+            for layer in base_layers + overlay_layers:
+                if layer.control_disabled:
+                    self._has_disabled = True
+                    break
 
             # Build trees.
             built_base = build_tree(base_layers, explicit_tree=self._base_skeleton)
