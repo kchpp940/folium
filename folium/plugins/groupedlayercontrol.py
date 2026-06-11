@@ -74,31 +74,37 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
         self.options = remove_empty(**kwargs)
         if exclusive_groups:
             self.options["exclusiveGroups"] = list(groups.keys())
-        self.layers_untoggle = set()
-
-        model = LayerControlModel()
-        for group_name, sublist in groups.items():
-            for element in sublist:
-                model.add_layer(element, group=group_name)
-                element.control = False
-
-        model.deduplicate()
-        model.sort_by_weight()
-
+        self._groups = groups
+        self._exclusive_groups = exclusive_groups
         self.grouped_overlays: OrderedDict[str, OrderedDict[str, str]] = (
             OrderedDict()
         )
-        for entry in model.overlays:
-            grp = entry.group or ""
-            if grp not in self.grouped_overlays:
-                self.grouped_overlays[grp] = OrderedDict()
-            self.grouped_overlays[grp][entry.label] = entry.js_name
+        self.layers_untoggle: set = set()
+        for sublist in groups.values():
+            for element in sublist:
+                element.control = False
 
+    def render(self, **kwargs):
+        model = LayerControlModel.from_map_children(self._parent)
+
+        for sublist in self._groups.values():
+            for element in sublist:
+                model.ensure_layer(element)
+
+        model.apply_group_overrides(self._groups)
+        model.deduplicate()
+        model.sort_by_weight()
+
+        self.grouped_overlays = model.as_grouped_dicts()
+
+        self.layers_untoggle = set()
         for entry in model.entries:
             if not entry.is_visible or entry.is_disabled:
                 self.layers_untoggle.add(entry.js_name)
 
-        if exclusive_groups:
-            for group_name, sublist in groups.items():
+        if self._exclusive_groups:
+            for sublist in self._groups.values():
                 for element in sublist[1:]:
                     self.layers_untoggle.add(element.get_name())
+
+        super().render()

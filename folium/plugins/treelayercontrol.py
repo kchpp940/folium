@@ -158,10 +158,22 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
         kwargs["expand_all"] = expand_all
         kwargs["label_is_selector"] = label_is_selector
         self.options = remove_empty(**kwargs)
-        self._model = LayerControlModel()
-        self.base_tree = LayerControlModel.normalize_tree(
-            base_tree, is_overlay=False, model=self._model
+        self._base_tree_raw = base_tree
+        self._overlay_tree_raw = overlay_tree
+        self.base_tree = None
+        self.overlay_tree = None
+
+    def render(self, **kwargs):
+        model = LayerControlModel.from_map_children(self._parent)
+
+        self.base_tree = model.normalize_tree(
+            self._base_tree_raw, is_overlay=False
         )
-        self.overlay_tree = LayerControlModel.normalize_tree(
-            overlay_tree, is_overlay=True, model=self._model
+        self.overlay_tree = model.normalize_tree(
+            self._overlay_tree_raw, is_overlay=True
         )
+
+        model.deduplicate()
+        model.sort_by_weight()
+
+        super().render()

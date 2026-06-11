@@ -687,7 +687,19 @@ class GeoJson(Layer):
         marker: Union[Circle, CircleMarker, Marker, None] = None,
         **kwargs: Any,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "GeoJson"
         self.embed = embed
         self.embed_link: Optional[str] = None
@@ -1016,8 +1028,21 @@ class TopoJson(JSCSSMixin, Layer):
         show: bool = True,
         smooth_factor: Optional[float] = None,
         tooltip: Union[str, Tooltip, None] = None,
+        control_order: int = 0,
+        control_group: Optional[str] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            control_order=control_order,
+            control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "TopoJson"
 
         if "read" in dir(data):
@@ -1528,7 +1553,19 @@ class Choropleth(FeatureGroup):
         use_jenks: bool = False,
         **kwargs,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "Choropleth"
 
         fill_color = fill_color or ("blue" if data is None else "Blues")

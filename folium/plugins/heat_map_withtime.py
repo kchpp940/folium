@@ -1,3 +1,5 @@
+from typing import Optional
+
 from folium.elements import JSCSSMixin
 from folium.map import Layer
 from folium.template import Template
@@ -232,8 +234,21 @@ class HeatMapWithTime(JSCSSMixin, Layer):
         overlay=True,
         control=True,
         show=True,
+        control_order: int = 0,
+        control_group: Optional[str] = None,
+        control_disabled: bool = False,
+        control_collapsed: bool = False,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        super().__init__(
+            name=name,
+            overlay=overlay,
+            control=control,
+            show=show,
+            control_order=control_order,
+            control_group=control_group,
+            control_disabled=control_disabled,
+            control_collapsed=control_collapsed,
+        )
         self._name = "HeatMap"
         self._control_name = self.get_name() + "Control"
 

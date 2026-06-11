@@ -86,9 +86,21 @@ class MarkerCluster(JSCSSMixin, Layer):
         options=None,
         **kwargs,
     ):
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
         if options is not None:
-            kwargs.update(options)  # options argument is legacy
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+            kwargs.update(options)
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "MarkerCluster"
 
         if locations is not None:

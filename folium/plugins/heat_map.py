@@ -75,7 +75,19 @@ class HeatMap(JSCSSMixin, Layer):
         show=True,
         **kwargs,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "HeatMap"
         data = if_pandas_df_convert_to_numpy(data)
         self.data = [

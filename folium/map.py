@@ -200,7 +200,19 @@ class FeatureGroup(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "FeatureGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
@@ -251,7 +263,19 @@ class LayerGroup(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        _ctrl = {
+            k: kwargs.pop(k)
+            for k in (
+                "control_order",
+                "control_group",
+                "control_disabled",
+                "control_collapsed",
+            )
+            if k in kwargs
+        }
+        super().__init__(
+            name=name, overlay=overlay, control=control, show=show, **_ctrl
+        )
         self._name = "LayerGroup"
         self.tile_name = name if name is not None else self.get_name()
         self.options = remove_empty(**kwargs)
