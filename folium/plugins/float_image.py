@@ -1,9 +1,12 @@
+from typing import Optional
+
 from branca.element import MacroElement
 
+from folium.elements import CaptionMixin
 from folium.template import Template
 
 
-class FloatImage(MacroElement):
+class FloatImage(CaptionMixin, MacroElement):
     """Adds a floating image in HTML canvas on top of the map.
 
     Parameters
@@ -15,6 +18,9 @@ class FloatImage(MacroElement):
         Vertical position from the bottom, as a percentage of screen height.
     left: int, default 75
         Horizontal position from the left, as a percentage of screen width.
+    caption: dict, optional
+        Metadata and legend caption for the float image.
+        See folium.raster_layers.ImageOverlay for the full list of supported keys.
     **kwargs
         Additional keyword arguments are applied as CSS properties.
         For example: `width='300px'`.
@@ -43,10 +49,18 @@ class FloatImage(MacroElement):
             {% endmacro %}
             """)
 
-    def __init__(self, image, bottom=75, left=75, **kwargs):
+    def __init__(
+        self,
+        image,
+        bottom=75,
+        left=75,
+        caption: Optional[dict] = None,
+        **kwargs,
+    ):
         super().__init__()
         self._name = "FloatImage"
         self.image = image
         self.bottom = bottom
         self.left = left
         self.css = kwargs
+        self._init_caption(caption, show=True)

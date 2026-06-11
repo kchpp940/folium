@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional, Union
 
 import xyzservices
 
+from folium.elements import CaptionMixin
 from folium.map import Layer
 from folium.template import Template
 from folium.utilities import (
@@ -21,7 +22,7 @@ from folium.utilities import (
 )
 
 
-class TileLayer(Layer):
+class TileLayer(CaptionMixin, Layer):
     """
     Create a tile layer to append on a Map.
 
@@ -74,6 +75,9 @@ class TileLayer(Layer):
         services).
     opacity: float, default 1
         Sets the opacity for the layer.
+    caption: dict, optional
+        Metadata and legend caption for the tile layer.
+        See ImageOverlay for the full list of supported keys.
     **kwargs : additional keyword arguments
         Other keyword arguments are passed as options to the Leaflet tileLayer
         object.
@@ -105,6 +109,7 @@ class TileLayer(Layer):
         subdomains: str = "abc",
         tms: bool = False,
         opacity: float = 1,
+        caption: Optional[dict] = None,
         **kwargs,
     ):
         if isinstance(tiles, str):
@@ -151,6 +156,7 @@ class TileLayer(Layer):
             opacity=opacity,
             **kwargs,
         )
+        self._init_caption(caption, show=show)
 
 
 class WmsTileLayer(Layer):
@@ -231,7 +237,7 @@ class WmsTileLayer(Layer):
             self.options["cql_filter"] = cql_filter
 
 
-class ImageOverlay(Layer):
+class ImageOverlay(CaptionMixin, Layer):
     """
     Used to load and display a single image over specific bounds of
     the map, implements ILayer interface.
@@ -275,6 +281,22 @@ class ImageOverlay(Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    caption: dict, optional
+        Metadata and legend caption for the image layer.
+        Supports the following keys:
+
+        - title: str, title of the layer
+        - description: str, detailed description
+        - unit: str, unit of measurement (e.g., '°C', 'm/s')
+        - resolution: str, spatial resolution (e.g., '1km', '30m')
+        - source_url: str, URL to the data source
+        - source_text: str, display text for the source link
+        - updated_time: str, last update time
+        - copyright: str, copyright information
+        - legend: list of dicts with 'label' and 'color' keys
+        - collapsible: bool, whether the panel is collapsible (default True)
+        - collapsed: bool, whether initially collapsed (default False)
+        - position: str, control position (default 'bottomright')
 
     See https://leafletjs.com/reference.html#imageoverlay for more
     options.
@@ -319,6 +341,7 @@ class ImageOverlay(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        caption: Optional[dict] = None,
         **kwargs,
     ):
         super().__init__(name=name, overlay=overlay, control=control, show=show)
@@ -332,6 +355,7 @@ class ImageOverlay(Layer):
             )
 
         self.url = image_to_url(image, origin=origin, colormap=colormap)
+        self._init_caption(caption, show=show)
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """
@@ -342,7 +366,7 @@ class ImageOverlay(Layer):
         return normalize_bounds_type(self.bounds)
 
 
-class VideoOverlay(Layer):
+class VideoOverlay(CaptionMixin, Layer):
     """
     Used to load and display a video over the map.
 
@@ -363,6 +387,9 @@ class VideoOverlay(Layer):
         Whether the Layer will be included in LayerControls.
     show: bool, default True
         Whether the layer will be shown on opening.
+    caption: dict, optional
+        Metadata and legend caption for the video layer.
+        See ImageOverlay for the full list of supported keys.
     **kwargs:
         Other valid (possibly inherited) options. See:
         https://leafletjs.com/reference.html#videooverlay
@@ -389,6 +416,7 @@ class VideoOverlay(Layer):
         overlay: bool = True,
         control: bool = True,
         show: bool = True,
+        caption: Optional[dict] = None,
         **kwargs: TypeJsonValue,
     ):
         super().__init__(name=name, overlay=overlay, control=control, show=show)
@@ -397,11 +425,12 @@ class VideoOverlay(Layer):
 
         self.bounds = bounds
         self.options = remove_empty(autoplay=autoplay, loop=loop, **kwargs)
+        self._init_caption(caption, show=show)
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """
         Computes the bounds of the object itself (not including it's children)
-        in the form [[lat_min, lon_min], [lat_max, lon_max]]
+        in the form [[lat_min, lon_min], [lat_max, lon_max]].
 
         """
         return normalize_bounds_type(self.bounds)

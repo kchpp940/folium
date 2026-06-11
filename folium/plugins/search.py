@@ -1,665 +1,90 @@
-from __future__ import annotations
-
-import json
-from dataclasses import dataclass, asdict
-from typing import Any, Optional, Union
-
 from branca.element import MacroElement
 
 from folium import FeatureGroup, GeoJson, TopoJson
 from folium.elements import JSCSSMixin
+
+# from folium.map import FeatureGroup
+# from folium.features import GeoJson, TopoJson
 from folium.folium import Map
-from folium.map import Marker
-from folium.plugins import FeatureGroupSubGroup, MarkerCluster
+from folium.plugins import MarkerCluster
 from folium.template import Template
 from folium.utilities import remove_empty
-
-
-LayerType = Union[GeoJson, TopoJson, FeatureGroup, MarkerCluster, FeatureGroupSubGroup]
-
-_TPL_OPEN = "__TPL_OPEN__"
-_TPL_CLOSE = "__TPL_CLOSE__"
-
-
-def _encode_template(tpl: Optional[str]) -> Optional[str]:
-    if tpl is None:
-        return None
-    return tpl.replace("{{", _TPL_OPEN).replace("}}", _TPL_CLOSE)
-
-
-@dataclass
-class SearchEntry:
-    layer_var: str
-    stable_id: str
-    weight: float
-    geom_type: str
-    search_zoom: Optional[int]
-    haystack: str
-    properties: dict
-    geometry: dict
-    style_options: dict
-    source_label: Optional[str]
-
-    def as_dict(self) -> dict:
-        return asdict(self)
-
-
-# ---------------------------------------------------------------------------
-# Registration record: pairs a stable_id with the information needed to
-# locate the real Leaflet layer at runtime.  Produced during Python-side
-# serialization and consumed by the JS registration code emitted by render().
-# ---------------------------------------------------------------------------
-@dataclass
-class _RegEntry:
-    stable_id: str
-    layer_var: str
-    kind: str
-    js_var: Optional[str] = None
-
-
-def _read_property_bag(kind: str, obj: Any, id_field: Optional[str]) -> dict:
-    if kind == "geojson_feature":
-        return dict(obj.get("properties") or {})
-    if kind == "marker":
-        bag = dict(getattr(obj, "options", None) or {})
-        return bag
-    return {}
-
-
-def _read_field_values(
-    fields: Optional[list[str]],
-    bag: dict,
-) -> list[str]:
-    if not fields:
-        return []
-    return [str(bag[f]) for f in fields if f in bag and bag[f] is not None]
-
-
-def _make_stable_id(
-    id_field: Optional[str],
-    bag: dict,
-    fallback: str,
-    cfg_idx: int,
-) -> str:
-    if id_field and id_field in bag and bag[id_field] is not None:
-        return f"id_{bag[id_field]}"
-    return f"cfg{cfg_idx}_{fallback}"
-
-
-def _geometry_of(kind: str, obj: Any) -> dict:
-    if kind == "geojson_feature":
-        return dict(obj.get("geometry") or {"type": "Point", "coordinates": [0, 0]})
-    if kind == "marker":
-        loc = getattr(obj, "location", None)
-        if loc and len(loc) == 2:
-            return {"type": "Point", "coordinates": [loc[1], loc[0]]}
-        return {"type": "Point", "coordinates": [0, 0]}
-    return {"type": "Point", "coordinates": [0, 0]}
-
-
-def _iter_marker_children(container: Any) -> list[Marker]:
-    markers: list[Marker] = []
-    for child in getattr(container, "_children", {}).values():
-        if isinstance(child, Marker):
-            markers.append(child)
-        elif isinstance(child, (FeatureGroup, MarkerCluster, FeatureGroupSubGroup)):
-            markers.extend(_iter_marker_children(child))
-    return markers
-
-
-def _find_child_group_refs(container: Any, root_map: Any) -> list[Any]:
-    results: list[Any] = []
-    found_ids: set[int] = set()
-
-    def matches(node: Any) -> bool:
-        if not isinstance(node, FeatureGroupSubGroup):
-            return False
-        if id(node) in found_ids:
-            return False
-        if node._group is container:
-            return True
-        for sub in results:
-            if node._group is sub:
-                return True
-        return False
-
-    changed = True
-    while changed:
-        changed = False
-
-        def walk(node: Any) -> None:
-            nonlocal changed
-            for child in getattr(node, "_children", {}).values():
-                if matches(child):
-                    results.append(child)
-                    found_ids.add(id(child))
-                    changed = True
-                if isinstance(
-                    child,
-                    (FeatureGroup, MarkerCluster, FeatureGroupSubGroup),
-                ):
-                    walk(child)
-
-        walk(root_map)
-    return results
-
-
-def _collect_all_markers(container: Any, root_map: Any) -> list[Marker]:
-    markers = list(_iter_marker_children(container))
-    for sub in _find_child_group_refs(container, root_map):
-        markers.extend(_iter_marker_children(sub))
-    return markers
-
-
-def _serialize_layer(
-    cfg: "SearchLayerConfig",
-    cfg_idx: int,
-    root_map: Any = None,
-) -> tuple[list[SearchEntry], list[_RegEntry]]:
-    entries: list[SearchEntry] = []
-    regs: list[_RegEntry] = []
-    layer = cfg.layer
-    search_fields = cfg.search_fields or []
-    display_fields = cfg.display_fields or []
-
-    # -------- GeoJson --------
-    if isinstance(layer, GeoJson):
-        features = (layer.data or {}).get("features", [])
-        for idx, feat in enumerate(features):
-            kind = "geojson_feature"
-            bag = _read_property_bag(kind, feat, cfg.id_field)
-            sid = bag.get("__searchSid") or _make_stable_id(
-                cfg.id_field,
-                bag,
-                f"{cfg.layer_var}_f{idx}",
-                cfg_idx,
-            )
-            haystack_parts = _read_field_values(search_fields, bag)
-            if not haystack_parts:
-                haystack_parts = [str(v) for v in bag.values() if v is not None]
-            clean_bag = {k: v for k, v in bag.items() if k != "__searchSid"}
-            props_for_js = {
-                **clean_bag,
-                "__displayFields": _read_field_values(display_fields, bag),
-            }
-            geom = feat.get("geometry")
-            entries.append(
-                SearchEntry(
-                    layer_var=cfg.layer_var,
-                    stable_id=sid,
-                    weight=cfg.weight,
-                    geom_type=cfg.geom_type,
-                    search_zoom=cfg.search_zoom,
-                    haystack=" ".join(haystack_parts),
-                    properties=props_for_js,
-                    geometry=dict(geom) if geom else _geometry_of(kind, feat),
-                    style_options=dict(cfg.options or {}),
-                    source_label=cfg.layer_var,
-                )
-            )
-            regs.append(
-                _RegEntry(
-                    stable_id=sid,
-                    layer_var=cfg.layer_var,
-                    kind="geojson",
-                )
-            )
-        return entries, regs
-
-    # -------- TopoJson --------
-    if isinstance(layer, TopoJson):
-        obj_name = layer.object_path.split(".")[-1]
-        topo_objs = (layer.data or {}).get("objects", {}).get(obj_name, {})
-        geometries = topo_objs.get("geometries", [])
-        for idx, geom in enumerate(geometries):
-            kind = "geojson_feature"
-            bag = _read_property_bag(kind, geom, cfg.id_field)
-            sid = bag.get("__searchSid") or _make_stable_id(
-                cfg.id_field,
-                bag,
-                f"{cfg.layer_var}_g{idx}",
-                cfg_idx,
-            )
-            haystack_parts = _read_field_values(search_fields, bag)
-            if not haystack_parts:
-                haystack_parts = [str(v) for v in bag.values() if v is not None]
-            clean_bag = {k: v for k, v in bag.items() if k != "__searchSid"}
-            props_for_js = {
-                **clean_bag,
-                "__displayFields": _read_field_values(display_fields, bag),
-            }
-            entries.append(
-                SearchEntry(
-                    layer_var=cfg.layer_var,
-                    stable_id=sid,
-                    weight=cfg.weight,
-                    geom_type=cfg.geom_type,
-                    search_zoom=cfg.search_zoom,
-                    haystack=" ".join(haystack_parts),
-                    properties=props_for_js,
-                    geometry={"type": "Point", "coordinates": [0, 0]},
-                    style_options=dict(cfg.options or {}),
-                    source_label=cfg.layer_var,
-                )
-            )
-            regs.append(
-                _RegEntry(
-                    stable_id=sid,
-                    layer_var=cfg.layer_var,
-                    kind="topojson",
-                )
-            )
-        return entries, regs
-
-    # -------- Marker containers --------
-    if isinstance(layer, (FeatureGroup, MarkerCluster, FeatureGroupSubGroup)):
-        if root_map is None:
-            markers = _iter_marker_children(layer)
-        else:
-            markers = _collect_all_markers(layer, root_map)
-        for marker in markers:
-            kind = "marker"
-            bag = _read_property_bag(kind, marker, cfg.id_field)
-            sid = _make_stable_id(
-                cfg.id_field,
-                bag,
-                f"{marker.get_name()}",
-                cfg_idx,
-            )
-            haystack_parts = _read_field_values(search_fields, bag)
-            if not haystack_parts and "title" in bag:
-                haystack_parts = [str(bag["title"])]
-            props_for_js = {
-                **bag,
-                "__displayFields": _read_field_values(display_fields, bag)
-                or ([str(bag["title"])] if "title" in bag else []),
-            }
-            entries.append(
-                SearchEntry(
-                    layer_var=cfg.layer_var,
-                    stable_id=sid,
-                    weight=cfg.weight,
-                    geom_type=cfg.geom_type,
-                    search_zoom=cfg.search_zoom,
-                    haystack=" ".join(haystack_parts),
-                    properties=props_for_js,
-                    geometry=_geometry_of(kind, marker),
-                    style_options=dict(cfg.options or {}),
-                    source_label=cfg.layer_var,
-                )
-            )
-            regs.append(
-                _RegEntry(
-                    stable_id=sid,
-                    layer_var=cfg.layer_var,
-                    kind="marker",
-                    js_var=marker.get_name(),
-                )
-            )
-        return entries, regs
-
-    raise TypeError(f"Unsupported layer type: {type(layer).__name__}")
-
-
-def _dedupe_pairs(
-    pairs: list[tuple[SearchEntry, _RegEntry]],
-) -> tuple[list[SearchEntry], list[_RegEntry]]:
-    """Deduplicate (entry, reg) pairs by ``stable_id``, keeping the one
-    with the highest ``weight``.
-
-    Stable: if two pairs share the same weight, the first one wins.
-    """
-    best: dict[str, tuple[SearchEntry, _RegEntry]] = {}
-    for entry, reg in pairs:
-        existing_pair = best.get(entry.stable_id)
-        if (
-            existing_pair is None
-            or existing_pair[0].weight < entry.weight
-        ):
-            best[entry.stable_id] = (entry, reg)
-    entries = [p[0] for p in best.values()]
-    regs = [p[1] for p in best.values()]
-    return entries, regs
-
-
-class SearchLayerConfig:
-    """
-    Configuration for a single searchable layer within a unified Search control.
-
-    Parameters
-    ----------
-    layer : GeoJson, TopoJson, FeatureGroup, MarkerCluster or FeatureGroupSubGroup
-        The layer whose features should be indexed for search.
-    search_fields : str or list of str, optional
-        The property field(s) to search on.
-    display_fields : str or list of str, optional
-        The property field(s) shown in the result suggestion.
-    label_template : str, optional
-        A custom template string used to render each result row.
-    id_field : str, optional
-        A property name used as a stable identifier across layers.
-    weight : int or float, default 1
-        A weight applied to this layer's matches.
-    search_zoom : int, optional
-        Zoom level used when flying to a match from this layer.
-    geom_type : str, default ``"Point"``
-        One of ``"Point"``, ``"Line"`` or ``"Polygon"``.
-    **kwargs
-        Additional style options applied to a matched feature on this layer only.
-    """
-
-    def __init__(
-        self,
-        layer: LayerType,
-        search_fields: Optional[Union[str, list[str]]] = None,
-        display_fields: Optional[Union[str, list[str]]] = None,
-        label_template: Optional[str] = None,
-        id_field: Optional[str] = None,
-        weight: Union[int, float] = 1,
-        search_zoom: Optional[int] = None,
-        geom_type: str = "Point",
-        **kwargs: Any,
-    ):
-        if not isinstance(
-            layer,
-            (GeoJson, TopoJson, FeatureGroup, MarkerCluster, FeatureGroupSubGroup),
-        ):
-            raise TypeError(
-                "SearchLayerConfig.layer must be a GeoJson, TopoJson, "
-                "FeatureGroup, MarkerCluster or FeatureGroupSubGroup instance."
-            )
-        self.layer = layer
-        self.search_fields = (
-            [search_fields] if isinstance(search_fields, str) else search_fields
-        )
-        self.display_fields = (
-            [display_fields]
-            if isinstance(display_fields, str)
-            else (display_fields or self.search_fields)
-        )
-        self.label_template = _encode_template(label_template)
-        self.id_field = id_field
-        self.weight = weight
-        self.search_zoom = search_zoom
-        self.geom_type = geom_type
-        self.options = remove_empty(**kwargs)
-
-    @property
-    def layer_var(self) -> str:
-        return self.layer.get_name()
-
-    def get_properties_keys(self) -> Optional[tuple[str, ...]]:
-        if isinstance(self.layer, GeoJson):
-            features = self.layer.data.get("features")
-            if features and len(features) > 0:
-                props = features[0].get("properties") or {}
-                return tuple(props.keys())
-        if isinstance(self.layer, TopoJson):
-            obj_name = self.layer.object_path.split(".")[-1]
-            geometries = self.layer.data.get("objects", {}).get(obj_name, {}).get(
-                "geometries"
-            )
-            if geometries and len(geometries) > 0:
-                props = geometries[0].get("properties") or {}
-                return tuple(props.keys())
-        return None
-
-    def validate(self) -> None:
-        keys = self.get_properties_keys()
-        if keys is None:
-            return
-        for field_list in (self.search_fields or [], self.display_fields or []):
-            if field_list is None:
-                continue
-            for f in field_list:
-                if f not in keys:
-                    raise AssertionError(
-                        f"The field '{f}' was not available in {keys}"
-                    )
 
 
 class Search(JSCSSMixin, MacroElement):
     """
     Adds a search tool to your map.
 
-    Supports indexing features from multiple layers at once, with optional
-    deduplication by a stable identifier, weighted sorting and per-layer
-    configuration.
-
-    Layer-data differences are resolved on the Python side during render.
-    Each configured layer is flattened into a list of :class:`SearchEntry`
-    records.  A deterministic JS registration table (``window.__searchReg``)
-    maps each ``stable_id`` to the real Leaflet layer object so that
-    highlight / popup / fly-to always operate on the authoritative layer,
-    never on the invisible index layer and never via heuristic matching.
-
     Parameters
     ----------
-    layer : GeoJson, TopoJson, FeatureGroup, MarkerCluster or FeatureGroupSubGroup, optional
-        Legacy single-layer parameter.
-    search_label : str, optional
-        Legacy parameter – shorthand for ``search_fields=search_label``.
-    search_zoom : int, optional
-        Global default zoom level.
-    geom_type : str, default ``"Point"``
-        Global default geometry type.
-    position : str, default ``'topleft'``
-    placeholder : str, default ``'Search'``
-    collapsed : bool, default False
-    text_not_found : str, default ``'Not found'``
-    label_template : str, optional
-        Global default template for result rows.
-    layers : list of SearchLayerConfig, optional
-        The multi-source configuration.
-    **kwargs
-        Style options applied to every matched feature.
+    layer: GeoJson, TopoJson, FeatureGroup, MarkerCluster class object.
+        The map layer to index in the Search view.
+    search_label: str, optional
+        'properties' key in layer to index Search, if layer is GeoJson/TopoJson.
+    search_zoom: int, optional
+        Zoom level to set the map to on match.
+        By default zooms to Polygon/Line bounds and points
+        on their natural extent.
+    geom_type: str, default 'Point'
+        Feature geometry type. "Point", "Line" or "Polygon"
+    position: str, default 'topleft'
+        Change the position of the search bar, can be:
+        'topleft', 'topright', 'bottomright' or 'bottomleft',
+    placeholder: str, default 'Search'
+        Placeholder text inside the Search box if nothing is entered.
+    collapsed: boolean, default False
+        Whether the Search box should be collapsed or not.
+    **kwargs.
+        Assorted style options to change feature styling on match.
+        Use the same way as vector layer arguments.
+
+    See https://github.com/stefanocudini/leaflet-search for more information.
+
     """
 
-    _template = Template(
-        r"""
+    _template = Template("""
         {% macro script(this, kwargs) %}
-            (function () {
-                var map = {{ this._parent.get_name() }};
-                var index = {{ this.search_index|tojson }};
-                var globalStyle = {{ this.options|tojavascript }};
-                var globalTpl = {{ this.label_template|tojson|safe }};
-
-                // ---------------------------------------------------------
-                // Deterministic registry: stable_id → real Leaflet layer.
-                // Populated by code emitted from Python render() which
-                // knows exactly which sub-layer maps to which stable_id.
-                // No heuristic matching; deterministic registry only.
-                // ---------------------------------------------------------
-                if (!window.__searchReg) window.__searchReg = {};
-                {{ this._registration_js }}
-
-                // ---------------------------------------------------------
-                // Build the invisible index layer for leaflet-search.
-                // ---------------------------------------------------------
-                var unifiedLayer = L.geoJson(null, {
-                    pointToLayer: function (feature, latlng) {
-                        return L.circleMarker(latlng, { radius: 0, opacity: 0 });
-                    },
-                    style: function () { return { opacity: 0, fillOpacity: 0 }; }
+            var {{this.layer.get_name()}}searchControl = new L.Control.Search({
+                layer: {{this.layer.get_name()}},
+                {% if this.search_label %}
+                propertyName: '{{this.search_label}}',
+                {% endif %}
+                collapsed: {{this.collapsed|tojson|safe}},
+                textPlaceholder: '{{this.placeholder}}',
+                position:'{{this.position}}',
+            {% if this.geom_type == 'Point' %}
+                initial: false,
+                {% if this.search_zoom %}
+                zoom: {{this.search_zoom}},
+                {% endif %}
+                hideMarkerOnCollapse: true
+            {% else %}
+                marker: false,
+                moveToLocation: function(latlng, title, map) {
+                var zoom = {% if this.search_zoom %} {{ this.search_zoom }} {% else %} map.getBoundsZoom(latlng.layer.getBounds()) {% endif %}
+                    map.flyTo(latlng, zoom); // access the zoom
+                }
+            {% endif %}
                 });
-
-                index.forEach(function (entry) {
-                    var feature = {
-                        type: 'Feature',
-                        properties: Object.assign(
-                            { __searchHaystack: entry.haystack },
-                            entry.properties
-                        ),
-                        geometry: entry.geometry
-                    };
-                    var layer = unifiedLayer.addData(feature).getLayers().slice(-1)[0];
-                    layer.__searchEntry = entry;
-                });
-
-                // ---------------------------------------------------------
-                // Template compiler.
-                // ---------------------------------------------------------
-                {% raw %}
-                function compileTemplate(tpl, ctx) {
-                    if (!tpl) return '';
-                    var OPEN = '__TPL_OPEN__';
-                    var CLOSE = '__TPL_CLOSE__';
-                    var backslash = '\\';
-                    var re = new RegExp(
-                        OPEN + backslash + 's*([\\w.]+)' + backslash + 's*' + CLOSE, 'g'
-                    );
-                    return tpl.replace(re, function (_, path) {
-                        var parts = path.split('.');
-                        var val = ctx;
-                        for (var i = 0; i < parts.length; i++) {
-                            if (val == null) return '';
-                            val = val[parts[i]];
-                        }
-                        return (val == null) ? '' : String(val);
+                {{this.layer.get_name()}}searchControl.on('search:locationfound', function(e) {
+                    {{this.layer.get_name()}}.setStyle(function(feature){
+                        return feature.properties.style
+                    })
+                    {% if this.options %}
+                    e.layer.setStyle({{ this.options|tojavascript }});
+                    {% endif %}
+                    if(e.layer._popup)
+                        e.layer.openPopup();
+                })
+                {{this.layer.get_name()}}searchControl.on('search:collapsed', function(e) {
+                        {{this.layer.get_name()}}.setStyle(function(feature){
+                            return feature.properties.style
                     });
-                }
-                {% endraw %}
-
-                function buildLabel(entry, layerTpl) {
-                    var props = entry.properties || {};
-                    var ctx = {
-                        properties: props,
-                        options: props,
-                        weight: entry.weight,
-                        layerName: entry.sourceLabel
-                    };
-                    var tpl = layerTpl || globalTpl;
-                    if (tpl) return compileTemplate(tpl, ctx);
-                    var fields = props.__displayFields || [];
-                    if (Array.isArray(fields) && fields.length) {
-                        return fields.join(' \u00b7 ');
-                    }
-                    return entry.haystack;
-                }
-
-                // ---------------------------------------------------------
-                // Instantiate the search control.
-                // ---------------------------------------------------------
-                var {{ this.get_name() }} = new L.Control.Search({
-                    layer: unifiedLayer,
-                    propertyName: '__searchHaystack',
-                    collapsed: {{ this.collapsed|tojson|safe }},
-                    textPlaceholder: '{{ this.placeholder }}',
-                    textNotFound: '{{ this.text_not_found }}',
-                    position: '{{ this.position }}',
-                    initial: false,
-                    hideMarkerOnCollapse: true,
-                    marker: false,
-                    sortFeatures: function (a, b) {
-                        var wa = a.layer.__searchEntry
-                               ? a.layer.__searchEntry.weight : 1;
-                        var wb = b.layer.__searchEntry
-                               ? b.layer.__searchEntry.weight : 1;
-                        if (wb !== wa) return wb - wa;
-                        return a.value.length - b.value.length;
-                    },
-                    buildTip: function (text, val) {
-                        var entry = val.layer.__searchEntry;
-                        var layerTpl = null;
-                        if (entry && entry.layerTpl) layerTpl = entry.layerTpl;
-                        var tip = entry ? buildLabel(entry, layerTpl) : text;
-                        return L.DomUtil.create('div', 'search-tip')
-                               .appendChild(document.createTextNode(
-                                   tip || text)).parentNode;
-                    },
-                    moveToLocation: function (latlng, title, map) {
-                        var entry = latlng.layer
-                                  ? latlng.layer.__searchEntry : null;
-                        if (!entry) return;
-                        // Deterministic lookup – no guessing.
-                        var orig = window.__searchReg[entry.stableId] || null;
-                        var targetZoom = entry.searchZoom;
-                        {% if this.search_zoom %}
-                            if (targetZoom == null) targetZoom = {{ this.search_zoom }};
-                        {% endif %}
-                        var geom = entry.geomType || 'Point';
-                        if (geom === 'Point') {
-                            var pos = orig && orig.getLatLng
-                                      ? orig.getLatLng()
-                                      : (latlng.latlng || latlng);
-                            if (targetZoom == null) targetZoom = map.getZoom();
-                            map.flyTo(pos, targetZoom);
-                        } else if (orig && orig.getBounds) {
-                            var bounds = orig.getBounds();
-                            if (targetZoom == null) {
-                                targetZoom = map.getBoundsZoom(bounds);
-                            }
-                            map.flyToBounds(bounds, { maxZoom: targetZoom });
-                        } else {
-                            map.flyTo(latlng.latlng || latlng,
-                                      targetZoom || map.getZoom());
-                        }
-                        latlng.__resolvedOriginal = orig;
-                    }
                 });
+            {{this._parent.get_name()}}.addControl( {{this.layer.get_name()}}searchControl );
 
-                // ---------------------------------------------------------
-                // Highlight & style handling.
-                // ---------------------------------------------------------
-                function applyStyle(entry, layer) {
-                    if (!layer || typeof layer.setStyle !== 'function') return;
-                    var merged = L.extend({}, globalStyle, entry.styleOptions || {});
-                    if (Object.keys(merged).length) layer.setStyle(merged);
-                }
-
-                function resetAllStyles() {
-                    {% for cfg in this.layer_configs %}
-                    (function () {
-                        var src = {{ cfg.layer_var }};
-                        if (src && typeof src.setStyle === 'function') {
-                            try {
-                                src.setStyle(function (feature) {
-                                    return feature && feature.properties
-                                           ? feature.properties.style
-                                           : {};
-                                });
-                            } catch (e) {}
-                        }
-                        if (src && typeof src.eachLayer === 'function') {
-                            src.eachLayer(function (l) {
-                                if (typeof l.resetStyle === 'function') {
-                                    try { l.resetStyle(); } catch (e) {}
-                                }
-                                if (l.feature && l.feature.properties &&
-                                    l.feature.properties.style &&
-                                    typeof l.setStyle === 'function') {
-                                    try { l.setStyle(l.feature.properties.style); }
-                                    catch (e) {}
-                                }
-                            });
-                        }
-                    })();
-                    {% endfor %}
-                }
-
-                {{ this.get_name() }}.on('search:locationfound', function (e) {
-                    resetAllStyles();
-                    var entry = e.layer ? e.layer.__searchEntry : null;
-                    // Deterministic lookup – no guessing.
-                    var orig = (e.__resolvedOriginal)
-                               || (entry ? window.__searchReg[entry.stableId] : null)
-                               || e.layer;
-                    if (entry && orig) applyStyle(entry, orig);
-                    if (orig && orig._popup) orig.openPopup();
-                    if (orig && typeof orig.bindTooltip === 'function' &&
-                        !orig._tooltip && entry) {
-                        var label = buildLabel(entry, entry.layerTpl || null);
-                        if (label) orig.bindTooltip(label).openTooltip();
-                    }
-                });
-
-                {{ this.get_name() }}.on('search:collapsed', resetAllStyles);
-
-                map.addControl({{ this.get_name() }});
-            })();
         {% endmacro %}
-        """
-    )
+        """)  # noqa
 
     default_js = [
         (
@@ -676,111 +101,29 @@ class Search(JSCSSMixin, MacroElement):
 
     def __init__(
         self,
-        layer: Optional[LayerType] = None,
-        search_label: Optional[str] = None,
-        search_zoom: Optional[int] = None,
-        geom_type: str = "Point",
-        position: str = "topleft",
-        placeholder: str = "Search",
-        collapsed: bool = False,
-        text_not_found: str = "Not found",
-        label_template: Optional[str] = None,
-        layers: Optional[list[SearchLayerConfig]] = None,
-        **kwargs: Any,
+        layer,
+        search_label=None,
+        search_zoom=None,
+        geom_type="Point",
+        position="topleft",
+        placeholder="Search",
+        collapsed=False,
+        **kwargs,
     ):
         super().__init__()
-        self._name = "Search"
-
-        if layers is None and layer is None:
-            raise ValueError(
-                "Search requires either a 'layer' (legacy single-layer) "
-                "argument or a 'layers' (list of SearchLayerConfig) argument."
-            )
-        if layers is not None and layer is not None:
-            raise ValueError(
-                "Search accepts either 'layer' OR 'layers', not both."
-            )
-
-        if layer is not None:
-            layers = [
-                SearchLayerConfig(
-                    layer=layer,
-                    search_fields=search_label,
-                    display_fields=search_label,
-                    search_zoom=search_zoom,
-                    geom_type=geom_type,
-                    **kwargs,
-                )
-            ]
-            kwargs = {}
-
-        for cfg in layers:
-            if not isinstance(cfg, SearchLayerConfig):
-                raise TypeError(
-                    "Every entry in 'layers' must be a SearchLayerConfig "
-                    f"instance; got {type(cfg).__name__}."
-                )
-
-        self.layer_configs = layers
+        assert isinstance(layer, (GeoJson, MarkerCluster, FeatureGroup, TopoJson)), (
+            "Search can only index FeatureGroup, "
+            "MarkerCluster, GeoJson, and TopoJson layers at "
+            "this time."
+        )
+        self.layer = layer
+        self.search_label = search_label
         self.search_zoom = search_zoom
+        self.geom_type = geom_type
         self.position = position
         self.placeholder = placeholder
         self.collapsed = collapsed
-        self.text_not_found = text_not_found
-        self.label_template = _encode_template(label_template)
         self.options = remove_empty(**kwargs)
-
-        self.search_index: list = []
-        self._registration_js: str = ""
-
-        self._inject_feature_sids()
-
-        # Back-compat attributes.
-        self.layer = self.layer_configs[0].layer if layer is not None else None
-        self.search_label = search_label
-        self.geom_type = geom_type
-
-    def _inject_feature_sids(self) -> None:
-        """Write ``__searchSid`` into each GeoJson/TopoJson feature's
-        ``properties`` dict so that when the source layer renders, the
-        Leaflet sub-layers carry the stable id in their
-        ``feature.properties``.
-
-        This MUST happen before GeoJson.render() / TopoJson.render() so
-        the injected value is included in the rendered HTML.  Called from
-        ``__init__`` to guarantee ordering regardless of when the Search
-        control is added to the map.
-        """
-        for cfg_idx, cfg in enumerate(self.layer_configs):
-            layer = cfg.layer
-            if isinstance(layer, GeoJson):
-                features = (layer.data or {}).get("features", [])
-                for idx, feat in enumerate(features):
-                    bag = dict(feat.get("properties") or {})
-                    sid = _make_stable_id(
-                        cfg.id_field,
-                        bag,
-                        f"{cfg.layer_var}_f{idx}",
-                        cfg_idx,
-                    )
-                    if "properties" not in feat:
-                        feat["properties"] = {}
-                    feat["properties"]["__searchSid"] = sid
-            elif isinstance(layer, TopoJson):
-                obj_name = layer.object_path.split(".")[-1]
-                topo_objs = (layer.data or {}).get("objects", {}).get(obj_name, {})
-                geometries = topo_objs.get("geometries", [])
-                for idx, geom in enumerate(geometries):
-                    bag = dict(geom.get("properties") or {})
-                    sid = _make_stable_id(
-                        cfg.id_field,
-                        bag,
-                        f"{cfg.layer_var}_g{idx}",
-                        cfg_idx,
-                    )
-                    if "properties" not in geom:
-                        geom["properties"] = {}
-                    geom["properties"]["__searchSid"] = sid
 
     def test_params(self, keys):
         if keys is not None and self.search_label is not None:
@@ -791,96 +134,18 @@ class Search(JSCSSMixin, MacroElement):
             self._parent, Map
         ), "Search can only be added to folium Map objects."
 
-    def _build_registration_js(
-        self,
-        regs: list[_RegEntry],
-        entries: list[SearchEntry],
-    ) -> str:
-        """Generate deterministic JS that writes ``stable_id → real layer``
-        into ``window.__searchReg`` for every registered search entry.
-
-        GeoJson/TopoJson: each sub-layer created by L.geoJson carries
-        ``feature.properties.__searchSid`` – injected by
-        ``_inject_feature_sids()`` before the source layer renders.
-        The JS code walks eachLayer and registers by that property.
-        No positional assumptions; works with MultiPoint,
-        GeometryCollection, null geometry or filtered features.
-
-        Markers: matched by their global JS variable name (assigned by
-        branca and known at Python render time).
-        """
-        lines: list[str] = []
-
-        by_layer: dict[str, list[_RegEntry]] = {}
-        for r in regs:
-            by_layer.setdefault(r.layer_var, []).append(r)
-
-        for layer_var, layer_regs in by_layer.items():
-            marker_regs = [r for r in layer_regs if r.kind == "marker"]
-            geojson_regs = [r for r in layer_regs if r.kind in ("geojson", "topojson")]
-
-            for r in marker_regs:
-                if r.js_var:
-                    lines.append(
-                        f"if (typeof {r.js_var} !== 'undefined') {{ "
-                        f"window.__searchReg['{r.stable_id}'] = "
-                        f"{r.js_var}; }}"
-                    )
-
-            if geojson_regs:
-                lines.append(
-                    f"(function () {{"
-                    f"  var src = {layer_var};"
-                    f"  if (!src || typeof src.eachLayer !== 'function') return;"
-                    f"  src.eachLayer(function (l) {{"
-                    f"    var p = l.feature && l.feature.properties;"
-                    f"    if (p && p.__searchSid) window.__searchReg[p.__searchSid] = l;"
-                    f"  }});"
-                    f"}})();"
-                )
-
-        return "\n".join(lines)
-
     def render(self, **kwargs):
-        # Legacy validation path.
-        if self.layer is not None:
-            if isinstance(self.layer, GeoJson):
-                keys = tuple(self.layer.data["features"][0]["properties"].keys())
-            elif isinstance(self.layer, TopoJson):
-                obj_name = self.layer.object_path.split(".")[-1]
-                keys = tuple(
-                    self.layer.data["objects"][obj_name]["geometries"][0][
-                        "properties"
-                    ].keys()
-                )
-            else:
-                keys = None
-            self.test_params(keys=keys)
-
-        for cfg in self.layer_configs:
-            cfg.validate()
-
-        # ---- Build the unified search index entirely in Python. ----
-        raw_pairs: list[tuple[SearchEntry, _RegEntry]] = []
-        root_map = getattr(self, "_parent", None)
-        for idx, cfg in enumerate(self.layer_configs):
-            entries, regs = _serialize_layer(cfg, idx, root_map)
-            raw_pairs.extend(zip(entries, regs))
-
-        entries, regs = _dedupe_pairs(raw_pairs)
-
-        per_config_tpl: dict[str, Optional[str]] = {
-            cfg.layer_var: cfg.label_template for cfg in self.layer_configs
-        }
-        entries.sort(key=lambda e: (-e.weight, e.stable_id))
-
-        payload = []
-        for e in entries:
-            d = e.as_dict()
-            d["layerTpl"] = per_config_tpl.get(e.layer_var)
-            payload.append(d)
-
-        self.search_index = payload
-        self._registration_js = self._build_registration_js(regs, entries)
+        if isinstance(self.layer, GeoJson):
+            keys = tuple(self.layer.data["features"][0]["properties"].keys())
+        elif isinstance(self.layer, TopoJson):
+            obj_name = self.layer.object_path.split(".")[-1]
+            keys = tuple(
+                self.layer.data["objects"][obj_name]["geometries"][0][
+                    "properties"
+                ].keys()
+            )  # noqa
+        else:
+            keys = None
+        self.test_params(keys=keys)
 
         super().render(**kwargs)

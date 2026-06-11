@@ -26,7 +26,7 @@ from folium.plugins.polyline_offset import PolyLineOffset
 from folium.plugins.polyline_text_path import PolyLineTextPath
 from folium.plugins.realtime import Realtime
 from folium.plugins.scroll_zoom_toggler import ScrollZoomToggler
-from folium.plugins.search import Search, SearchLayerConfig
+from folium.plugins.search import Search
 from folium.plugins.semicircle import SemiCircle
 from folium.plugins.side_by_side import SideBySideLayers
 from folium.plugins.tag_filter_button import TagFilterButton
@@ -73,7 +73,6 @@ __all__ = [
     "Realtime",
     "ScrollZoomToggler",
     "Search",
-    "SearchLayerConfig",
     "SemiCircle",
     "SideBySideLayers",
     "StripePattern",
