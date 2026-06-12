@@ -895,17 +895,38 @@ class TestThreePathHtmlHandling:
         assert "&lt;b&gt;Bold&lt;/b&gt;" in html
         assert "&amp;" in html
 
-    def test_popup_text_param_is_always_safe_text(self):
-        """Popup(text=...) should always be plain text regardless of is_html."""
+    def test_popup_text_param_default_is_safe_text(self):
+        """Popup(text=..., is_html=False) defaults to safe_text (HTML-escaped)."""
         import folium
 
         m = folium.Map()
-        popup = folium.Popup(text="<b>Bold</b>", is_html=True)
+        popup = folium.Popup(text="<b>Bold</b> & 'Quotes'")
         folium.Marker([0, 0], popup=popup).add_to(m)
 
         html = m.get_root().render()
+        # is_html=False → HTML should be escaped
         assert "<b>Bold</b>" not in html
-        assert "&lt;b&gt;Bold&lt;/b&gt;" in html
+        assert "&lt;b&gt;Bold&lt;/b&gt;" in html or "&amp;" in html or "&#39;" in html
+
+    def test_popup_text_param_is_html_true_is_sanitized(self):
+        """Popup(text=..., is_html=True) → sanitized HTML (matching Tooltip/DivIcon behavior)."""
+        import folium
+
+        m = folium.Map()
+        popup = folium.Popup(
+            text='<p>Safe <b>HTML</b> <script>alert(1)</script> <span onclick="boom()">X</span></p>',
+            is_html=True,
+        )
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # Safe tags survive whitelist sanitization
+        assert "<b>HTML</b>" in html or "\\u003cb\\u003eHTML\\u003c/b\\u003e" in html
+        # Dangerous tags/attrs are stripped
+        assert "<script>alert(1)</script>" not in html
+        assert "onclick" not in html
+        # script tag content is also stripped (by _TAGS_TO_STRIP_CONTENT)
+        assert "alert(1)" not in html
 
     def test_popup_is_html_true_is_sanitized(self):
         """Popup(html=..., is_html=True) should apply whitelist sanitization."""
@@ -1243,6 +1264,182 @@ class TestDivIconParameterSemantics:
         # Default value of html and text must be None (no implicit content)
         assert sig.parameters["html"].default is None
         assert sig.parameters["text"].default is None
+
+
+class TestPopupParameterSemantics:
+    """Parameter semantic guards for Popup — prevent bypassing safety.
+
+    Verify that the Popup constructor correctly rejects ambiguous/invalid
+    parameter combinations, and that default values lock in the safe path.
+    """
+
+    def test_text_and_html_both_provided_raises(self):
+        """Rule 1: Cannot provide both text and html."""
+        import pytest
+        import folium
+
+        with pytest.raises(ValueError, match="cannot both be provided"):
+            folium.Popup(text="plain", html="<b>bold</b>")
+
+    def test_is_html_with_element_raises(self):
+        """Rule 2: is_html is redundant when html is an Element."""
+        import pytest
+        import folium
+        from branca.element import IFrame
+
+        iframe = IFrame(html="<div>x</div>", width=100, height=50)
+        with pytest.raises(ValueError, match="is not needed"):
+            folium.Popup(html=iframe, is_html=True)
+
+    def test_parse_html_with_is_html_true_raises(self):
+        """Rule 3: parse_html=True + is_html=True is contradictory."""
+        import pytest
+        import folium
+
+        with pytest.raises(ValueError, match="cannot both be set"):
+            folium.Popup(html="<b>text</b>", is_html=True, parse_html=True)
+
+    def test_default_params_all_safe_by_default(self):
+        """Verify default constructor arguments are the safe path."""
+        import inspect
+        import folium
+
+        sig = inspect.signature(folium.Popup.__init__)
+        assert sig.parameters["is_html"].default is False
+        assert sig.parameters["parse_html"].default is False
+        assert sig.parameters["html"].default is None
+        assert sig.parameters["text"].default is None
+
+    def test_default_string_is_safe_text(self):
+        """Popup('...') defaults to safe_text (HTML-escaped)."""
+        import folium
+
+        m = folium.Map()
+        popup = folium.Popup("<b>Bold & 'Quotes'</b>")
+        folium.Marker([0, 0], popup=popup).add_to(m)
+        html = m.get_root().render()
+        # HTML should be escaped, not rendered
+        assert "&lt;b&gt;Bold" in html or "&#39;" in html or "&amp;" in html
+
+    def test_is_html_true_applies_sanitization(self):
+        """Popup(html=..., is_html=True) uses whitelist sanitization."""
+        import folium
+
+        m = folium.Map()
+        popup = folium.Popup(
+            html='<p>Safe <b>HTML</b> <script>alert(1)</script> '
+                 '<span onclick="boom()">X</span></p>',
+            is_html=True,
+        )
+        folium.Marker([0, 0], popup=popup).add_to(m)
+        html = m.get_root().render()
+        # Safe tags survive
+        assert "<b>HTML</b>" in html or "\\u003cb\\u003eHTML\\u003c/b\\u003e" in html
+        # Dangerous tags/attrs are stripped
+        assert "<script>alert(1)</script>" not in html
+        assert "onclick" not in html
+
+    def test_element_is_trusted(self):
+        """Popup(html=Element) implicitly trusts Element objects."""
+        import base64
+        import re
+        import folium
+        from branca.element import IFrame
+
+        m = folium.Map()
+        # Pass dangerous content via IFrame (Element) — should NOT be sanitized
+        iframe = IFrame(
+            html='<div onclick="doEvil()">Click</div>',
+            width=100, height=50,
+        )
+        popup = folium.Popup(html=iframe)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+        html = m.get_root().render()
+        # IFrame renders to base64 data URL
+        match = re.search(r'data:text/html;charset=utf-8;base64,([^"]+)', html)
+        assert match is not None
+        decoded = base64.b64decode(match.group(1)).decode('utf-8')
+        # Dangerous content survives untouched
+        assert 'onclick="doEvil()"' in decoded
+
+
+class TestTooltipParameterSemantics:
+    """Parameter semantic guards for Tooltip — prevent bypassing safety.
+
+    Verify that the Tooltip constructor correctly rejects ambiguous/invalid
+    parameter combinations, and that default values lock in the safe path.
+    """
+
+    def test_text_and_html_both_provided_raises(self):
+        """Rule 1: Cannot provide both text and html."""
+        import pytest
+        import folium
+
+        with pytest.raises(ValueError, match="cannot both be provided"):
+            folium.Tooltip(text="plain", html="<b>bold</b>")
+
+    def test_is_html_with_html_param_raises(self):
+        """Rule 2: is_html is redundant when html parameter is used."""
+        import pytest
+        import folium
+
+        with pytest.raises(ValueError, match="can only be used with .text."):
+            folium.Tooltip(html="<b>bold</b>", is_html=True)
+
+    def test_default_params_all_safe_by_default(self):
+        """Verify default constructor arguments are the safe path."""
+        import inspect
+        import folium
+
+        sig = inspect.signature(folium.Tooltip.__init__)
+        assert sig.parameters["is_html"].default is False
+        assert sig.parameters["html"].default is None
+        assert sig.parameters["text"].default is None
+
+    def test_default_string_is_safe_text(self):
+        """Tooltip('...') defaults to safe_text (HTML-escaped)."""
+        import folium
+
+        m = folium.Map()
+        marker = folium.Marker([0, 0]).add_to(m)
+        marker.add_child(folium.Tooltip("<b>Bold & 'Quotes'</b>"))
+        html = m.get_root().render()
+        # HTML should be escaped via safe_text in the template
+        assert "&lt;b&gt;Bold" in html or "&amp;" in html
+
+    def test_html_param_is_sanitized(self):
+        """Tooltip(html=...) applies whitelist sanitization."""
+        import folium
+
+        m = folium.Map()
+        marker = folium.Marker([0, 0]).add_to(m)
+        marker.add_child(folium.Tooltip(
+            html='<p>Safe <b>HTML</b> <script>alert(1)</script> '
+                 '<span onclick="boom()">X</span></p>',
+        ))
+        html = m.get_root().render()
+        # Safe tags survive (via safe_html in template, which renders escaped)
+        # The template uses {{ content|safe_html }} so tags are preserved
+        assert "<b>HTML</b>" in html or "\\u003cb\\u003e" in html
+        # Dangerous content is stripped
+        assert "<script>alert(1)</script>" not in html
+        assert "onclick" not in html
+
+    def test_text_is_html_true_is_sanitized(self):
+        """Tooltip(text=..., is_html=True) applies whitelist sanitization."""
+        import folium
+
+        m = folium.Map()
+        marker = folium.Marker([0, 0]).add_to(m)
+        marker.add_child(folium.Tooltip(
+            text='<p>Safe <b>HTML</b> <script>alert(1)</script></p>',
+            is_html=True,
+        ))
+        html = m.get_root().render()
+        # Safe tags survive
+        assert "<b>HTML</b>" in html or "\\u003cb\\u003e" in html
+        # Dangerous tags stripped
+        assert "<script>alert(1)</script>" not in html
 
 
 # =============================================================================

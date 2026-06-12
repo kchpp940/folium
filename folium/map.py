@@ -650,16 +650,52 @@ class Popup(MacroElement):
         self.html._parent = self
         self.script._parent = self
 
+        # =====================================================================
+        # Parameter compatibility assertions — prevent semantic bypass
+        # =====================================================================
+
+        # Rule 1: text and html (non-None) cannot both be provided
+        if text is not None and html is not None:
+            raise ValueError(
+                "`text` and `html` cannot both be provided. "
+                "Use `text` for plain/sanitized text content, or `html` for HTML content."
+            )
+
+        # Rule 2: is_html is meaningless when html is an Element (Element is trusted)
+        if is_html and isinstance(html, Element):
+            raise ValueError(
+                "`is_html=True` is not needed when `html` is already an Element object — "
+                "those are implicitly treated as fully trusted HTML. "
+                "Remove the `is_html=True` flag."
+            )
+
+        # Rule 3: parse_html=True + is_html=True is contradictory
+        # parse_html=True → Html(script=False) auto-escapes HTML entities,
+        # so treating input as HTML makes no sense — the tags would be escaped.
+        if parse_html and is_html:
+            raise ValueError(
+                "`parse_html=True` and `is_html=True` cannot both be set. "
+                "`parse_html=True` causes the content to be HTML-escaped by the Html element, "
+                "which contradicts treating the input as HTML markup."
+            )
+
         script = not parse_html
 
         if isinstance(html, Element):
             self.html.add_child(html)
         elif text is not None:
             if script:
-                processed = safe_text(str(text))
+                if is_html:
+                    processed = safe_html(str(text))
+                else:
+                    processed = safe_text(str(text))
                 processed = escape_backticks(processed)
             else:
-                processed = str(text)
+                if is_html:
+                    # parse_html=True + is_html is blocked by Rule 3, shouldn't reach here
+                    processed = str(text)
+                else:
+                    processed = str(text)
             self.html.add_child(Html(processed, script=script))
         elif isinstance(html, str):
             if script:
@@ -703,17 +739,18 @@ class Tooltip(MacroElement):
 
     Parameters
     ----------
-    text: str
-        String to display as a tooltip on the object. If the argument is of a
-        different type it will be converted to str. Treated as plain text
+    text: str or None, default None
+        String to display as a tooltip on the object. Treated as plain text
         (HTML-escaped) by default unless `is_html=True`.
+        If `html` is also provided, `text` is ignored.
     html: str or None, default None
-        HTML content to display. If provided, this takes precedence over
-        `text` and is treated as HTML content (sanitized with whitelist).
+        HTML content to display. If provided, takes precedence over `text`
+        and is treated as HTML content (sanitized with tag/attribute whitelist).
+        To get fully trusted (unsanitized) HTML, use a Popup with Element instead.
     is_html: bool, default False
-        If True, the `text` parameter is treated as HTML content and
-        sanitized. If False (default), the `text` parameter is treated
-        as plain text and HTML-escaped.
+        Only applies when `text` is provided. If True, the `text` content is
+        treated as HTML and sanitized with a tag/attribute whitelist.
+        **Cannot** be combined with `html` parameter (html is always sanitized HTML).
     style: str, default None.
         HTML inline style properties like font and colors. Will be applied to
         a div with the text in it.
@@ -722,6 +759,13 @@ class Tooltip(MacroElement):
     **kwargs
         These values will map directly to the Leaflet Options. More info
         available here: https://leafletjs.com/reference.html#tooltip
+
+    Security Notes
+    --------------
+    Default behavior (no flags set) is safe:
+    - `Tooltip("...")` or `Tooltip(text="...")` → fully escaped (display literally)
+    - `Tooltip(html="...")` → whitelist-sanitized (only safe tags/attrs pass)
+    - `Tooltip(text="...", is_html=True)` → whitelist-sanitized
 
     """
 
@@ -747,6 +791,24 @@ class Tooltip(MacroElement):
     ):
         super().__init__()
         self._name = "Tooltip"
+
+        # =====================================================================
+        # Parameter compatibility assertions — prevent semantic bypass
+        # =====================================================================
+
+        # Rule 1: text and html cannot both be provided (ambiguous precedence)
+        if text is not None and html is not None:
+            raise ValueError(
+                "`text` and `html` cannot both be provided. "
+                "Use `text` for plain/sanitized text, or `html` for HTML content."
+            )
+
+        # Rule 2: is_html only applies to `text` — makes no sense with `html`
+        if is_html and html is not None:
+            raise ValueError(
+                "`is_html=True` can only be used with `text` parameter. "
+                "The `html` parameter is always treated as HTML content (sanitized)."
+            )
 
         if html is not None:
             self.content = str(html)
