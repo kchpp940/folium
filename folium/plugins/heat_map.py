@@ -48,8 +48,8 @@ class HeatMap(JSCSSMixin, Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.heatLayer(
-                {{ this.data|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.data|safe_js_value }},
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)

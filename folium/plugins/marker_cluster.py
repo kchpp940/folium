@@ -46,7 +46,7 @@ class MarkerCluster(JSCSSMixin, Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.markerClusterGroup(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
             {%- if this.icon_create_function is not none %}
             {{ this.get_name() }}.options.iconCreateFunction =

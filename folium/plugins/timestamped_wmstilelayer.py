@@ -65,11 +65,11 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.timeDimension = L.timeDimension(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
             {{ this._parent.get_name() }}.timeDimensionControl =
                 L.control.timeDimension(
-                    {{ this.options_control|tojavascript }}
+                    {{ this.options_control|safe_js_options }}
                 );
             {{ this._parent.get_name() }}.addControl(
                 {{ this._parent.get_name() }}.timeDimensionControl
@@ -80,7 +80,7 @@ class TimestampedWmsTileLayers(JSCSSMixin, MacroElement):
                 {{ layer.get_name() }},
                 {
                     updateTimeDimension: false,
-                    wmsVersion: {{ layer.options['version']|tojson }},
+                    wmsVersion: {{ layer.options['version']|safe_js_value }},
                 }
             ).addTo({{ this._parent.get_name() }});
             {% endfor %}

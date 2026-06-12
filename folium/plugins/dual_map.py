@@ -1,6 +1,6 @@
 from branca.element import Figure, MacroElement
 
-from folium.elements import EventHandler, JSCSSMixin, ResourceInjectingFigure
+from folium.elements import EventHandler, JSCSSMixin
 from folium.folium import Map
 from folium.map import LayerControl
 from folium.template import Template
@@ -81,7 +81,7 @@ class DualMap(JSCSSMixin, MacroElement):
             position="absolute",
             **kwargs,
         )
-        figure = ResourceInjectingFigure()
+        figure = Figure()
         figure.add_child(self.m1)
         figure.add_child(self.m2)
         # Important: add self to Figure last.
@@ -90,8 +90,9 @@ class DualMap(JSCSSMixin, MacroElement):
         self.children_for_m2_copied = []  # list with ids
 
     def _repr_html_(self, **kwargs):
+        """Displays the HTML Map in a Jupyter notebook."""
         if self._parent is None:
-            self.add_to(ResourceInjectingFigure())
+            self.add_to(Figure())
             out = self._parent._repr_html_(**kwargs)
             self._parent = None
         else:

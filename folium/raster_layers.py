@@ -82,8 +82,8 @@ class TileLayer(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.tileLayer(
-                {{ this.tiles|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.tiles|safe_url }},
+                {{ this.options|safe_js_options }}
 
             );
         {% endmacro %}
@@ -193,8 +193,8 @@ class WmsTileLayer(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.tileLayer.wms(
-                {{ this.url|tojson }},
-                {{ this.options|tojson }}
+                {{ this.url|safe_url }},
+                {{ this.options|safe_js_value }}
             );
         {% endmacro %}
         """)  # noqa
@@ -300,9 +300,9 @@ class ImageOverlay(Layer):
 
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.imageOverlay(
-                {{ this.url|tojson }},
-                {{ this.bounds|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.url|safe_url }},
+                {{ this.bounds|safe_js_value }},
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)
@@ -372,9 +372,9 @@ class VideoOverlay(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.videoOverlay(
-                {{ this.video_url|tojson }},
-                {{ this.bounds|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.video_url|safe_url }},
+                {{ this.bounds|safe_js_value }},
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)

@@ -47,8 +47,8 @@ class FastMarkerCluster(MarkerCluster):
             var {{ this.get_name() }} = (function(){
                 {{ this.callback }}
 
-                var data = {{ this.data|tojson }};
-                var cluster = L.markerClusterGroup({{ this.options|tojavascript }});
+                var data = {{ this.data|safe_js_value }};
+                var cluster = L.markerClusterGroup({{ this.options|safe_js_options }});
                 {%- if this.icon_create_function is not none %}
                 cluster.options.iconCreateFunction =
                     {{ this.icon_create_function.strip() }};

@@ -38,8 +38,8 @@ class SemiCircle(JSCSSMixin, Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.semiCircle(
-                {{ this.location|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_options }}
                 )
                 {%- if this.direction %}
                     .setDirection({{ this.direction[0] }}, {{ this.direction[1] }})

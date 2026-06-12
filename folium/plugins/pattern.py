@@ -34,7 +34,7 @@ class StripePattern(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.StripePattern(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
             {{ this.get_name() }}.addTo({{ this.parent_map.get_name() }});
         {% endmacro %}
@@ -104,10 +104,10 @@ class CirclePattern(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }}_shape = new L.PatternCircle(
-                {{ this.options_pattern_circle|tojavascript }}
+                {{ this.options_pattern_circle|safe_js_options }}
             );
             var {{ this.get_name() }} = new L.Pattern(
-                {{ this.options_pattern|tojavascript }}
+                {{ this.options_pattern|safe_js_options }}
             );
             {{ this.get_name() }}.addShape({{ this.get_name() }}_shape);
             {{ this.get_name() }}.addTo({{ this.parent_map }});

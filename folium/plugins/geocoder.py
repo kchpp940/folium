@@ -35,7 +35,7 @@ class Geocoder(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
 
-            var geocoderOpts_{{ this.get_name() }} = {{ this.options|tojavascript }};
+            var geocoderOpts_{{ this.get_name() }} = {{ this.options|safe_js_options }};
 
             // note: geocoder name should start with lowercase
             var geocoderName_{{ this.get_name() }} = geocoderOpts_{{ this.get_name() }}["provider"];

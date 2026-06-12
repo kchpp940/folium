@@ -53,6 +53,7 @@ from folium.utilities import (
     remove_empty,
     validate_locations,
 )
+from folium.safe_serialize import safe_css_value, safe_html
 from folium.vector_layers import Circle, CircleMarker, PolyLine, path_options
 
 
@@ -84,8 +85,8 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.RegularPolygonMarker(
-                {{ this.location|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_options }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)
@@ -548,11 +549,11 @@ class GeoJson(Layer):
         function {{ this.get_name() }}_styler(feature) {
             switch({{ this.feature_identifier }}) {
                 {%- for style, ids_list in this.style_map.items() if not style == 'default' %}
-                {% for id_val in ids_list %}case {{ id_val|tojson }}: {% endfor %}
-                    return {{ style }};
+                {% for id_val in ids_list %}case {{ id_val|safe_js_value }}: {% endfor %}
+                    return {{ style|safe_json_to_js }};
                 {%- endfor %}
                 default:
-                    return {{ this.style_map['default'] }};
+                    return {{ this.style_map['default']|safe_json_to_js }};
             }
         }
         {%- endif %}
@@ -560,20 +561,20 @@ class GeoJson(Layer):
         function {{ this.get_name() }}_highlighter(feature) {
             switch({{ this.feature_identifier }}) {
                 {%- for style, ids_list in this.highlight_map.items() if not style == 'default' %}
-                {% for id_val in ids_list %}case {{ id_val|tojson }}: {% endfor %}
-                    return {{ style }};
+                {% for id_val in ids_list %}case {{ id_val|safe_js_value }}: {% endfor %}
+                    return {{ style|safe_json_to_js }};
                 {%- endfor %}
                 default:
-                    return {{ this.highlight_map['default'] }};
+                    return {{ this.highlight_map['default']|safe_json_to_js }};
             }
         }
         {%- endif %}
 
         {%- if this.marker %}
         function {{ this.get_name() }}_pointToLayer(feature, latlng) {
-            var opts = {{ this.marker.options | tojavascript }};
+            var opts = {{ this.marker.options | safe_js_options }};
             {% if this.marker._name == 'Marker' and this.marker.icon %}
-            const iconOptions = {{ this.marker.icon.options | tojavascript }}
+            const iconOptions = {{ this.marker.icon.options | safe_js_options }}
             const iconRootAlias = L{%- if this.marker.icon._name == "Icon" %}.AwesomeMarkers{%- endif %}
             opts.icon = new iconRootAlias.{{ this.marker.icon._name }}(iconOptions)
             {% endif %}
@@ -638,7 +639,7 @@ class GeoJson(Layer):
         };
         var {{ this.get_name() }} = L.geoJson(null, {
             {%- if this.smooth_factor is not none  %}
-                smoothFactor: {{ this.smooth_factor|tojson }},
+                smoothFactor: {{ this.smooth_factor|safe_js_value }},
             {%- endif %}
                 onEachFeature: {{ this.get_name() }}_onEachFeature,
             {% if this.style %}
@@ -647,7 +648,7 @@ class GeoJson(Layer):
             {%- if this.marker %}
                 pointToLayer: {{ this.get_name() }}_pointToLayer,
             {%- endif %}
-            ...{{this.options | tojavascript }}
+            ...{{this.options | safe_js_options }}
         });
 
         function {{ this.get_name() }}_add (data) {
@@ -655,9 +656,9 @@ class GeoJson(Layer):
                 .addData(data);
         }
         {%- if this.embed %}
-            {{ this.get_name() }}_add({{ this.data|tojson }});
+            {{ this.get_name() }}_add({{ this.data|safe_js_value }});
         {%- else %}
-            $.ajax({{ this.embed_link|tojson }}, {dataType: 'json', async: false})
+            $.ajax({{ this.embed_link|safe_url }}, {dataType: 'json', async: false})
                 .done({{ this.get_name() }}_add);
         {%- endif %}
 
@@ -980,7 +981,7 @@ class TopoJson(JSCSSMixin, Layer):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-            var {{ this.get_name() }}_data = {{ this.data|tojson }};
+            var {{ this.get_name() }}_data = {{ this.data|safe_js_value }};
             var {{ this.get_name() }} = L.geoJson(
                 topojson.feature(
                     {{ this.get_name() }}_data,
@@ -988,7 +989,7 @@ class TopoJson(JSCSSMixin, Layer):
                 ),
                 {
                 {%- if this.smooth_factor is not none %}
-                    smoothFactor: {{ this.smooth_factor|tojson }},
+                    smoothFactor: {{ this.smooth_factor|safe_js_value }},
                 {%- endif %}
                 }
             ).addTo({{ this._parent.get_name() }});
@@ -1118,19 +1119,28 @@ class GeoJsonDetail(MacroElement):
         } else if (typeof(feature)=='object') {
             return JSON.stringify(feature);
         } else {
-            return feature;
+            return String(feature);
         }
     }
-    let fields = {{ this.fields | tojson | safe }};
-    let aliases = {{ this.aliases | tojson | safe }};
+    let fields = {{ this.fields | safe_js_value }};
+    let aliases = {{ this.aliases | safe_js_value }};
+    let escapeHtml = text => {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
     let table = '<table>' +
         String(
         fields.map(
         (v,i)=>
         `<tr>{% if this.labels %}
-            <th>${aliases[i]{% if this.localize %}.toLocaleString(){% endif %}}</th>
+            <th>${escapeHtml(aliases[i]{% if this.localize %}.toLocaleString(){% endif %})}</th>
             {% endif %}
-            <td>${handleObject(layer.feature.properties[v]){% if this.localize %}.toLocaleString(){% endif %}}</td>
+            <td>${escapeHtml(handleObject(layer.feature.properties[v]){% if this.localize %}.toLocaleString(){% endif %})}</td>
         </tr>`).join(''))
     +'</table>';
     div.innerHTML=table;
@@ -1169,8 +1179,7 @@ class GeoJsonDetail(MacroElement):
             assert isinstance(
                 style, str
             ), "Pass a valid inline HTML style property string to style."
-            # noqa outside of type checking.
-            self.style = style
+            self.style = safe_css_value(style)
 
     def warn_for_geometry_collections(self) -> None:
         """Checks for GeoJson GeometryCollection features to warn user about incompatibility."""
@@ -1289,7 +1298,7 @@ class GeoJsonTooltip(GeoJsonDetail):
     {% macro script(this, kwargs) %}
     {{ this._parent.get_name() }}.bindTooltip("""
         + GeoJsonDetail.base_template
-        + """,{{ this.tooltip_options | tojavascript }});
+        + """,{{ this.tooltip_options | safe_js_options }});
                      {% endmacro %}
                      """
     )
@@ -1357,7 +1366,7 @@ class GeoJsonPopup(GeoJsonDetail):
     {% macro script(this, kwargs) %}
     {{ this._parent.get_name() }}.bindPopup("""
         + GeoJsonDetail.base_template
-        + """,{{ this.popup_options | tojavascript }});
+        + """,{{ this.popup_options | safe_js_options }});
                      {% endmacro %}
                      """
     )
@@ -1728,7 +1737,7 @@ class DivIcon(MacroElement):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-            var {{ this.get_name() }} = L.divIcon({{ this.options|tojavascript }});
+            var {{ this.get_name() }} = L.divIcon({{ this.options|safe_js_options }});
         {% endmacro %}
         """)  # noqa
 
@@ -1896,7 +1905,7 @@ class CustomIcon(Icon):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-        var {{ this.get_name() }} = L.icon({{ this.options|tojavascript }});
+        var {{ this.get_name() }} = L.icon({{ this.options|safe_js_options }});
         {% endmacro %}
         """)  # noqa
 
@@ -2022,9 +2031,9 @@ class Control(JSCSSMixin, Class):
       {% macro script(this, kwargs) %}
           var {{ this.get_name() }} = new L.Control.{{this._name}}(
               {% for arg in this.args %}
-                  {{ arg | tojavascript }},
+                  {{ arg | safe_js_value }},
               {% endfor %}
-              {{ this.options|tojavascript }}
+              {{ this.options|safe_js_options }}
           ).addTo({{ this._parent.get_name() }});
       {% endmacro %}
     """)

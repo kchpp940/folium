@@ -37,8 +37,8 @@ class PolyLineTextPath(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this.polyline.get_name() }}.setText(
-                {{ this.text|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.text|safe_js_value }},
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)

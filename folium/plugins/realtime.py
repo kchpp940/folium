@@ -70,11 +70,11 @@ class Realtime(JSCSSMixin, FeatureGroup):
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.realtime(
             {% if this.src is string or this.src is mapping -%}
-                {{ this.src|tojson }},
+                {{ this.src|safe_url }},
             {% else -%}
                 {{ this.src.js_code }},
             {% endif -%}
-                {{ this.options | tojavascript }}
+                {{ this.options | safe_js_options }}
             );
             {{ this._parent.get_name() }}.addLayer(
                 {{ this.get_name() }}._container

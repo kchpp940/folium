@@ -25,8 +25,8 @@ class _BaseFromEncoded(JSCSSMixin, MacroElement, ABC):
         {% macro script(this, kwargs) %}
 
             var {{ this.get_name() }} = L.{{ this._encoding_type }}.fromEncoded(
-                {{ this.encoded|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.encoded|safe_js_value }},
+                {{ this.options|safe_js_options }}
             ).addTo({{ this._parent.get_name() }});
 
         {% endmacro %}

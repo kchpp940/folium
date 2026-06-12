@@ -50,7 +50,7 @@ def test_polyline_text_path():
     tmpl = Template("""
         {{ this.polyline.get_name() }}.setText(
             "{{this.text}}",
-            {{ this.options|tojavascript }}
+            {{ this.options|safe_js_options }}
         );
         """)
 

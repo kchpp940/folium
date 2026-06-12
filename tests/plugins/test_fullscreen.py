@@ -19,7 +19,7 @@ def test_fullscreen():
     # verify that the fullscreen control was rendered
     tmpl = Template("""
         L.control.fullscreen(
-            {{ this.options|tojavascript }}
+            {{ this.options|safe_js_options }}
         ).addTo({{this._parent.get_name()}});
     """)
 

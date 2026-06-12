@@ -145,7 +145,7 @@ def test_timestamped_geo_json():
             }
         );
         var timeDimensionControl = new L.Control.TimeDimensionCustom(
-            {{ this.options|tojavascript }}
+            {{ this.options|safe_js_options }}
         );
         {{this._parent.get_name()}}.addControl(this.timeDimensionControl);
 

@@ -22,6 +22,7 @@ from folium.utilities import (
     remove_empty,
     validate_location,
 )
+from folium.safe_serialize import safe_css_value, safe_html, safe_js_options
 
 
 class classproperty:
@@ -166,7 +167,7 @@ class FeatureGroup(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.featureGroup(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)
@@ -217,7 +218,7 @@ class LayerGroup(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.layerGroup(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)
@@ -274,19 +275,19 @@ class LayerControl(MacroElement):
             var {{ this.get_name() }}_layers = {
                 base_layers : {
                     {%- for key, val in this.base_layers.items() %}
-                    {{ key|tojson }} : {{val}},
+                    {{ key|safe_layer_name }} : {{val}},
                     {%- endfor %}
                 },
                 overlays :  {
                     {%- for key, val in this.overlays.items() %}
-                    {{ key|tojson }} : {{val}},
+                    {{ key|safe_layer_name }} : {{val}},
                     {%- endfor %}
                 },
             };
             let {{ this.get_name() }} = L.control.layers(
                 {{ this.get_name() }}_layers.base_layers,
                 {{ this.get_name() }}_layers.overlays,
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             ).addTo({{this._parent.get_name()}});
 
             {%- if this.draggable %}
@@ -367,7 +368,7 @@ class Icon(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.AwesomeMarkers.icon(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
 
@@ -375,9 +376,9 @@ class Icon(MacroElement):
             {% if this.is_hex %}
             <style>
                 /* Dynamically generated CSS to replace the sprite image with a colored teardrop */
-                .awesome-marker-icon-{{ this.color_name }} {
+                .awesome-marker-icon-{{ this.color_name|safe_css_identifier }} {
                     background-image: none;
-                    background-color: {{ this.color }};
+                    background-color: {{ this.color|safe_css_value }};
                     width: 35px;
                     height: 35px;
                     border-radius: 50% 50% 50% 0;
@@ -391,7 +392,7 @@ class Icon(MacroElement):
                     justify-content: center;
                 }
                 /* Counter-rotate the inner icon so it stands up straight */
-                .awesome-marker-icon-{{ this.color_name }} i {
+                .awesome-marker-icon-{{ this.color_name|safe_css_identifier }} i {
                     transform: rotate(45deg);
                 }
             </style>
@@ -494,8 +495,8 @@ class Marker(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.marker(
-                {{ this.location|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_options }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)
@@ -595,7 +596,7 @@ class Popup(MacroElement):
     """
 
     _template = Template("""
-        var {{this.get_name()}} = L.popup({{ this.options|tojavascript }});
+        var {{this.get_name()}} = L.popup({{ this.options|safe_js_options }});
 
         {% for name, element in this.html._children.items() %}
             {% if this.lazy %}
@@ -641,6 +642,7 @@ class Popup(MacroElement):
         if isinstance(html, Element):
             self.html.add_child(html)
         elif isinstance(html, str):
+            html = safe_html(html)
             html = escape_backticks(html)
             self.html.add_child(Html(html, script=script))
 
@@ -692,10 +694,10 @@ class Tooltip(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.bindTooltip(
-                `<div{% if this.style %} style={{ this.style|tojson }}{% endif %}>
-                     {{ this.text }}
+                `<div{% if this.style %} style="{{ this.style|safe_css_value }}"{% endif %}>
+                     {{ this.text|safe_text }}
                  </div>`,
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
         {% endmacro %}
         """)
@@ -719,8 +721,7 @@ class Tooltip(MacroElement):
             assert isinstance(
                 style, str
             ), "Pass a valid inline HTML style property string to style."
-            # noqa outside of type checking.
-            self.style = style
+            self.style = safe_css_value(style)
 
 
 class FitBounds(MacroElement):
@@ -747,8 +748,8 @@ class FitBounds(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.fitBounds(
-                {{ this.bounds|tojson }},
-                {{ this.options|tojson }}
+                {{ this.bounds|safe_js_value }},
+                {{ this.options|safe_js_value }}
             );
         {% endmacro %}
         """)
@@ -797,7 +798,7 @@ class FitOverlays(MacroElement):
                 }
             });
             if (bounds.isValid()) {
-                {{ this._parent.get_name() }}.{{ this.method }}(bounds, {{ this.options|tojavascript }});
+                {{ this._parent.get_name() }}.{{ this.method }}(bounds, {{ this.options|safe_js_options }});
             }
         }
         {{ this._parent.get_name() }}.on('overlayadd', customFlyToBounds);
@@ -848,8 +849,8 @@ class CustomPane(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = {{ this._parent.get_name() }}.createPane(
-                {{ this.name|tojson }});
-            {{ this.get_name() }}.style.zIndex = {{ this.z_index|tojson }};
+                {{ this.name|safe_js_value }});
+            {{ this.get_name() }}.style.zIndex = {{ this.z_index|safe_js_value }};
             {% if not this.pointer_events %}
                 {{ this.get_name() }}.style.pointerEvents = 'none';
             {% endif %}

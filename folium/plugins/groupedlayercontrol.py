@@ -48,14 +48,14 @@ class GroupedLayerControl(JSCSSMixin, MacroElement):
                 null,
                 {
                     {%- for group_name, overlays in this.grouped_overlays.items() %}
-                    {{ group_name|tojson }} : {
+                    {{ group_name|safe_layer_name }} : {
                         {%- for overlaykey, val in overlays.items() %}
-                        {{ overlaykey|tojson }} : {{val}},
+                        {{ overlaykey|safe_layer_name }} : {{val}},
                         {%- endfor %}
                     },
                     {%- endfor %}
                 },
-                {{ this.options|tojavascript }},
+                {{ this.options|safe_js_options }},
             ).addTo({{this._parent.get_name()}});
 
             {%- for val in this.layers_untoggle %}

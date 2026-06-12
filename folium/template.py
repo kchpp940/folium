@@ -5,6 +5,17 @@ import jinja2
 from branca.element import Element
 
 from folium.utilities import JsCode, TypeJsonValue, camelize
+from folium.safe_serialize import (
+    safe_text,
+    safe_html,
+    safe_url,
+    safe_css_value,
+    safe_js_value,
+    safe_js_options,
+    safe_layer_name,
+    safe_css_identifier,
+    safe_json_to_js,
+)
 
 
 def tojavascript(obj: Union[str, JsCode, dict, list, Element]) -> str:
@@ -48,6 +59,15 @@ class Environment(jinja2.Environment):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.filters["tojavascript"] = tojavascript
+        self.filters["safe_text"] = safe_text
+        self.filters["safe_html"] = safe_html
+        self.filters["safe_url"] = safe_url
+        self.filters["safe_css_value"] = safe_css_value
+        self.filters["safe_js_value"] = safe_js_value
+        self.filters["safe_js_options"] = safe_js_options
+        self.filters["safe_layer_name"] = safe_layer_name
+        self.filters["safe_css_identifier"] = safe_css_identifier
+        self.filters["safe_json_to_js"] = safe_json_to_js
 
 
 class Template(jinja2.Template):

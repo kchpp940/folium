@@ -80,10 +80,10 @@ class Timeline(GeoJson):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-          var {{ this.get_name() }}_options = {{ this.options|tojavascript }};
+          var {{ this.get_name() }}_options = {{ this.options|safe_js_options }};
 
           var {{ this.get_name() }} = L.timeline(
-              {{ this.data|tojson }},
+              {{ this.data|safe_js_value }},
               {{ this.get_name() }}_options
           );
           {{ this.get_name() }}.addTo({{ this._parent.get_name() }});
@@ -177,7 +177,7 @@ class TimelineSlider(JSCSSMixin, MacroElement):
 
         {% macro script(this, kwargs) %}
           var {{ this.get_name() }} = L.timelineSliderControl(
-              {{ this.options|tojavascript }}
+              {{ this.options|safe_js_options }}
           );
           {{ this.get_name() }}.addTo({{ this._parent.get_name() }});
 

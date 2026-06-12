@@ -44,7 +44,7 @@ def test_antpath():
     tmpl = Template("""
           {{this.get_name()}} = L.polyline.antPath(
                   {{ this.locations|tojson }},
-                  {{ this.options|tojavascript }}
+                  {{ this.options|safe_js_options }}
                 )
                 .addTo({{this._parent.get_name()}});
         """)  # noqa

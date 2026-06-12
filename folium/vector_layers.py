@@ -182,8 +182,8 @@ class PolyLine(BaseMultiLocation):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.polyline(
-                {{ this.locations|tojson }},
-                {{ this.options|tojson }}
+                {{ this.locations|safe_js_value }},
+                {{ this.options|safe_js_value }}
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
         """)
@@ -219,8 +219,8 @@ class Polygon(BaseMultiLocation):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.polygon(
-                {{ this.locations|tojson }},
-                {{ this.options|tojson }}
+                {{ this.locations|safe_js_value }},
+                {{ this.options|safe_js_value }}
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
         """)
@@ -259,8 +259,8 @@ class Rectangle(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{this.get_name()}} = L.rectangle(
-                {{ this.locations|tojson }},
-                {{ this.options|tojson }}
+                {{ this.locations|safe_js_value }},
+                {{ this.options|safe_js_value }}
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
         """)
@@ -317,8 +317,8 @@ class Circle(Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.circle(
-                {{ this.location|tojson }},
-                {{ this.options|tojson }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_value }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)
@@ -361,8 +361,8 @@ class CircleMarker(Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.circleMarker(
-                {{ this.location|tojson }},
-                {{ this.options|tojson }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_value }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)

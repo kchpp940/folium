@@ -27,8 +27,8 @@ class BoatMarker(JSCSSMixin, Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.boatMarker(
-                {{ this.location|tojson }},
-                {{ this.options|tojavascript }}
+                {{ this.location|safe_js_value }},
+                {{ this.options|safe_js_options }}
             ).addTo({{ this._parent.get_name() }});
             {% if this.wind_heading is not none -%}
             {{ this.get_name() }}.setHeadingWind(

@@ -31,7 +31,7 @@ def test_polyline_from_encoded():
     tmpl = Template("""
         var {{this.get_name()}} = L.Polyline.fromEncoded(
                         {{ this.encoded|tojson }},
-                        {{ this.options|tojavascript }}
+                        {{ this.options|safe_js_options }}
         ).addTo({{this._parent.get_name()}});
         """)
 
@@ -65,7 +65,7 @@ def test_polygon_from_encoded():
     tmpl = Template("""
         var {{this.get_name()}} = L.Polygon.fromEncoded(
                             {{ this.encoded|tojson }},
-                            {{ this.options|tojavascript }}
+                            {{ this.options|safe_js_options }}
         )
         .addTo({{this._parent.get_name()}});
         """)

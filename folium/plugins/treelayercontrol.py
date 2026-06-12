@@ -125,9 +125,9 @@ class TreeLayerControl(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this,kwargs) %}
             L.control.layers.tree(
-                {{this.base_tree|tojavascript}},
-                {{this.overlay_tree|tojavascript}},
-                {{this.options|tojavascript}}
+                {{this.base_tree|safe_js_options}},
+                {{this.overlay_tree|safe_js_options}},
+                {{this.options|safe_js_options}}
             ).addTo({{this._parent.get_name()}});
         {% endmacro %}
         """)

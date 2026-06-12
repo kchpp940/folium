@@ -4,6 +4,7 @@ from branca.element import (
     CssLink,
     Div,
     Element,
+    Figure,
     Html,
     IFrame,
     JavascriptLink,
@@ -11,14 +12,6 @@ from branca.element import (
     MacroElement,
 )
 
-from folium.elements import (
-    Figure,
-    InlineScript,
-    InlineStyle,
-    ResourceInjectingFigure,
-    ResolvedCssLink,
-    ResolvedJavascriptLink,
-)
 from folium.features import (
     Choropleth,
     ClickForLatLng,
@@ -49,16 +42,6 @@ from folium.map import (
     Tooltip,
 )
 from folium.raster_layers import TileLayer, WmsTileLayer
-from folium.resources import (
-    ResourceContext,
-    ResourceEntry,
-    ResourceRegistry,
-    ResourceResolver,
-    ResourceResolverConfig,
-    ResourceStrategy,
-    ResourceType,
-    ResolvedResource,
-)
 from folium.utilities import JsCode
 from folium.vector_layers import Circle, CircleMarker, Polygon, PolyLine, Rectangle
 
@@ -102,8 +85,6 @@ __all__ = [
     "Html",
     "IFrame",
     "Icon",
-    "InlineScript",
-    "InlineStyle",
     "JavascriptLink",
     "JsCode",
     "LatLngPopup",
@@ -116,17 +97,6 @@ __all__ = [
     "Marker",
     "Popup",
     "RegularPolygonMarker",
-    "ResourceContext",
-    "ResourceEntry",
-    "ResourceInjectingFigure",
-    "ResourceRegistry",
-    "ResourceResolver",
-    "ResourceResolverConfig",
-    "ResourceStrategy",
-    "ResourceType",
-    "ResolvedCssLink",
-    "ResolvedJavascriptLink",
-    "ResolvedResource",
     "StepColormap",
     "TileLayer",
     "Tooltip",

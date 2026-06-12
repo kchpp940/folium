@@ -1,26 +1,15 @@
 from functools import wraps
-from typing import TYPE_CHECKING, Optional
 
 from branca.element import (
     CssLink,
-    Element,
-    Figure as _BrancaFigure,
+    Element,  # NoQA: F401  needed as a reexport
+    Figure,
     JavascriptLink,
     MacroElement,
 )
 
-from folium.resources import (
-    ResolvedResource,
-    ResourceContext,
-    ResourceEntry,
-    ResourceStrategy,
-    ResourceType,
-)
 from folium.template import Template
 from folium.utilities import JsCode, camelize
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 def leaflet_method(fn):
@@ -31,304 +20,29 @@ def leaflet_method(fn):
     return inner
 
 
-def get_or_create_resource_context(
-    figure: _BrancaFigure,
-    strategy: ResourceStrategy = ResourceStrategy.CDN,
-) -> ResourceContext:
-    """从 Figure 获取或创建 ResourceContext。
-
-    这是连接 branca.Figure 和 folium 资源管理系统的桥梁。
-    ResourceContext 附加到 Figure 的 _resource_context 属性上。
-    """
-    ctx = getattr(figure, "_resource_context", None)
-    if ctx is None:
-        ctx = ResourceContext(strategy=strategy)
-        figure._resource_context = ctx
-    return ctx
-
-
-class InlineScript(Element):
-    """内联 JavaScript 脚本元素。
-
-    从 ResolvedResource 创建，渲染层只消费已解析数据。
-    继承自 Element（非 MacroElement），使用直接模板。
-    """
-
-    _template = Template("<script>{{ this.content }}</script>")
-
-    def __init__(self, content: str):
-        super().__init__()
-        self._name = "InlineScript"
-        self.content = content
-
-
-class InlineStyle(Element):
-    """内联 CSS 样式元素。
-
-    从 ResolvedResource 创建，渲染层只消费已解析数据。
-    继承自 Element（非 MacroElement），使用直接模板。
-    """
-
-    _template = Template("<style>{{ this.content }}</style>")
-
-    def __init__(self, content: str):
-        super().__init__()
-        self._name = "InlineStyle"
-        self.content = content
-
-
-class ResolvedJavascriptLink(JavascriptLink):
-    """带 SRI 支持的 JavaScript 链接元素。
-
-    从 ResolvedResource 创建，渲染层只消费已解析数据。
-    使用直接模板（与 JavascriptLink 一致），而不是 macro 模板。
-    """
-
-    _template = Template(
-        '<script src="{{ this.url }}"'
-        '{%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}'
-        '{%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}'
-        '></script>'
-    )
-
-    def __init__(
-        self,
-        url: str,
-        integrity: Optional[str] = None,
-        crossorigin: Optional[str] = None,
-    ):
-        super().__init__(url)
-        self.integrity = integrity
-        self.crossorigin = crossorigin
-
-
-class ResolvedCssLink(CssLink):
-    """带 SRI 支持的 CSS 链接元素。
-
-    从 ResolvedResource 创建，渲染层只消费已解析数据。
-    使用直接模板（与 CssLink 一致），而不是 macro 模板。
-    """
-
-    _template = Template(
-        '<link rel="stylesheet" href="{{ this.url }}"'
-        '{%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}'
-        '{%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}'
-        '/>'
-    )
-
-    def __init__(
-        self,
-        url: str,
-        integrity: Optional[str] = None,
-        crossorigin: Optional[str] = None,
-    ):
-        super().__init__(url)
-        self.integrity = integrity
-        self.crossorigin = crossorigin
-
-
-def inject_resolved_resource(
-    figure: _BrancaFigure,
-    resource: ResolvedResource,
-) -> None:
-    """将已解析的资源注入到 Figure 的 header 中。
-
-    渲染层只消费 ResolvedResource，不涉及任何策略决策或网络操作。
-
-    根据资源类型和是否内联，创建相应的元素：
-    - 内联 JS: InlineScript
-    - 外链 JS: ResolvedJavascriptLink (带 SRI)
-    - 内联 CSS: InlineStyle
-    - 外链 CSS: ResolvedCssLink (带 SRI)
-    """
-    if resource.resource_type == ResourceType.JAVASCRIPT:
-        if resource.is_inline and resource.content is not None:
-            element: Element = InlineScript(resource.content)
-        elif resource.url is not None:
-            element = ResolvedJavascriptLink(
-                url=resource.url,
-                integrity=resource.integrity,
-                crossorigin=resource.crossorigin,
-            )
-        else:
-            raise ValueError(
-                f"Resolved JavaScript resource '{resource.name}' has "
-                f"neither content nor URL."
-            )
-    else:
-        if resource.is_inline and resource.content is not None:
-            element = InlineStyle(resource.content)
-        elif resource.url is not None:
-            element = ResolvedCssLink(
-                url=resource.url,
-                integrity=resource.integrity,
-                crossorigin=resource.crossorigin,
-            )
-        else:
-            raise ValueError(
-                f"Resolved CSS resource '{resource.name}' has "
-                f"neither content nor URL."
-            )
-
-    figure.header.add_child(element, name=resource.name)
-
-
-def inject_all_resolved_resources(figure: _BrancaFigure) -> None:
-    """解析并注入 Figure 的 ResourceContext 中的所有资源。
-
-    这是渲染前的最后一步，确保所有资源都已解析并注入。
-    应该在 Figure.render() 之前调用。
-    """
-    ctx = getattr(figure, "_resource_context", None)
-    if ctx is None:
-        return
-
-    for resource in ctx.resolve_all():
-        inject_resolved_resource(figure, resource)
-
-
-def harvest_legacy_links(figure: _BrancaFigure) -> None:
-    """扫描 Figure.header 中的旧式 JavascriptLink/CssLink，
-    转换为 ResourceEntry 并移除旧元素。
-
-    旧入口（如 features.py 中的 VegaLite）通过
-    figure.header.add_child(JavascriptLink(...)) 直接注入链接，
-    这些链接绕过了 ResourceContext/Resolver。此函数在渲染前
-    将它们纳入统一管线。
-
-    对普通 Figure 也能工作：如果没有 _resource_context，
-    自动创建一个。
-
-    转换规则：
-    - JavascriptLink → ResourceEntry(resource_type=JAVASCRIPT)
-    - CssLink → ResourceEntry(resource_type=CSS)
-    - 已有的 ResolvedJavascriptLink/ResolvedCssLink 保留不动
-    - 基于 name 去重：如果 ResourceContext 中已有同名资源，跳过
-    """
-    ctx = getattr(figure, "_resource_context", None)
-    if ctx is None:
-        ctx = get_or_create_resource_context(figure)
-
-    existing_names = {e.name for e in ctx._entries}
-
-    names_to_remove: list[str] = []
-    for name, child in list(figure.header._children.items()):
-        is_legacy_js = isinstance(child, JavascriptLink) and not isinstance(
-            child, ResolvedJavascriptLink
-        )
-        is_legacy_css = isinstance(child, CssLink) and not isinstance(
-            child, ResolvedCssLink
-        )
-
-        if not (is_legacy_js or is_legacy_css):
-            continue
-
-        url = child.url
-        if is_legacy_js:
-            resource_type = ResourceType.JAVASCRIPT
-        else:
-            resource_type = ResourceType.CSS
-
-        entry_name = name
-        if entry_name in existing_names:
-            names_to_remove.append(name)
-            continue
-
-        entry = ResourceEntry(
-            name=entry_name,
-            url=url,
-            resource_type=resource_type,
-        )
-        ctx.add_resource(entry)
-        existing_names.add(entry_name)
-        names_to_remove.append(name)
-
-    for name in names_to_remove:
-        del figure.header._children[name]
-
-    if names_to_remove and not isinstance(figure, ResourceInjectingFigure):
-        for resource in ctx.resolve_all():
-            inject_resolved_resource(figure, resource)
-
-
-class ResourceInjectingFigure(_BrancaFigure):
-    """扩展 branca.Figure，统一走 resolve → inject 资源管线。
-
-    所有策略（CDN/INLINE/LOCAL/MIRROR）均经过同一条数据流：
-        组件声明 ResourceEntry → ResourceContext 收集 → ResourceResolver 解析
-        → ResolvedResource → 渲染层只消费 ResolvedResource 注入 HTML
-
-    JSCSSMixin 不再直接注入任何链接，只负责收集 ResourceEntry。
-    """
-
-    def __init__(
-        self,
-        *args,
-        resource_strategy: ResourceStrategy = ResourceStrategy.CDN,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self._resource_context = ResourceContext(strategy=resource_strategy)
-
-    @property
-    def resource_context(self) -> ResourceContext:
-        """获取资源上下文。"""
-        return self._resource_context
-
-    def _prepare_render(self, **kwargs) -> None:
-        """准备渲染：收集资源声明 → 收割旧式链接 → 解析 → 注入。
-
-        统一流程（所有策略一致）：
-        1. 渲染所有子元素，触发 JSCSSMixin 收集 ResourceEntry
-        2. 收割 header 中的旧式 JavascriptLink/CssLink
-        3. 通过 ResourceContext.resolve_all() 产出 ResolvedResource
-        4. 将 ResolvedResource 注入到 header
-        """
-        for name, child in self._children.items():
-            child.render(**kwargs)
-
-        harvest_legacy_links(self)
-        self._inject_resolved_resources()
-
-    def render(self, **kwargs) -> str:
-        """渲染前统一解析并注入所有资源。"""
-        self._prepare_render(**kwargs)
-        return self._template.render(this=self, kwargs=kwargs)
-
-    def _repr_html_(self, **kwargs) -> str:
-        """Jupyter 显示前统一解析并注入所有资源。"""
-        self._prepare_render(**kwargs)
-        return super()._repr_html_(**kwargs)
-
-    def _inject_resolved_resources(self) -> None:
-        """解析所有资源并注入到 header。
-
-        所有策略统一走此路径：
-        - CDN: ResolvedJavascriptLink/ResolvedCssLink (带 URL + 可选 SRI)
-        - INLINE: InlineScript/InlineStyle (内联内容)
-        - LOCAL: ResolvedJavascriptLink/ResolvedCssLink (本地路径)
-        - MIRROR: ResolvedJavascriptLink/ResolvedCssLink (镜像 URL)
-        """
-        for resource in self._resource_context.resolve_all():
-            inject_resolved_resource(self, resource)
-
-
 class JSCSSMixin(MacroElement):
-    """Render links to external Javascript and CSS resources.
-
-    使用新的 ResourceContext 架构：
-    - 组件声明其依赖的资源（通过 default_js/default_css 或 add_js_link/add_css_link）
-    - 渲染时将资源声明收集到 Figure 的 ResourceContext
-    - 最终由 ResourceInjectingFigure 统一解析和注入
-
-    完全向后兼容：
-    - 保留 default_js/default_css 类属性
-    - 保留 add_js_link/add_css_link 方法
-    - 旧代码无需修改即可使用新架构
-    """
+    """Render links to external Javascript and CSS resources."""
 
     default_js: list[tuple[str, str]] = []
     default_css: list[tuple[str, str]] = []
+
+    # Since this is typically used as a mixin, we cannot
+    # override the _template member variable here. It would
+    # be overwritten by any subclassing class that also has
+    # a _template variable.
+    def render(self, **kwargs):
+        figure = self.get_root()
+        assert isinstance(
+            figure, Figure
+        ), "You cannot render this Element if it is not in a Figure."
+
+        for name, url in self.default_js:
+            figure.header.add_child(JavascriptLink(url), name=name)
+
+        for name, url in self.default_css:
+            figure.header.add_child(CssLink(url), name=name)
+
+        super().render(**kwargs)
 
     def add_css_link(self, name: str, url: str):
         """Add or update css resource link."""
@@ -350,73 +64,6 @@ class JSCSSMixin(MacroElement):
                 break
         else:
             default_list.append((name, url))
-
-    def declare_resource(self, entry: ResourceEntry) -> None:
-        """声明一个资源（新 API，支持完整元数据）。
-
-        相比于 add_js_link/add_css_link，此方法支持：
-        - SHA256 完整性校验
-        - Fallback URL
-        - 本地文件路径
-        - SRI integrity 属性
-        """
-        # 同步更新 default_js/default_css 以保持向后兼容
-        if entry.resource_type == ResourceType.JAVASCRIPT:
-            self.add_js_link(entry.name, entry.url)
-        else:
-            self.add_css_link(entry.name, entry.url)
-
-        # 将完整元数据存储到实例属性
-        if not hasattr(self, "_resource_entries"):
-            self._resource_entries = {}
-        self._resource_entries[entry.name] = entry
-
-    def render(self, **kwargs):
-        """收集资源声明到 ResourceContext。
-
-        JSCSSMixin 不再直接注入任何链接到 header。
-        所有资源统一走 ResourceEntry → ResourceContext → Resolver
-        → ResolvedResource → 渲染层注入的管线。
-
-        旧的 default_js/default_css 自动转换为 ResourceEntry。
-        新的 declare_resource() 直接提供完整 ResourceEntry。
-        """
-        figure = self.get_root()
-        assert isinstance(
-            figure, _BrancaFigure
-        ), "You cannot render this Element if it is not in a Figure."
-
-        ctx = get_or_create_resource_context(figure)
-
-        # 优先使用完整的 ResourceEntry（通过 declare_resource 声明的）
-        if hasattr(self, "_resource_entries"):
-            for entry in self._resource_entries.values():
-                ctx.add_resource(entry)
-
-        # 将 default_js/default_css 转换为 ResourceEntry（向后兼容）
-        for name, url in self.default_js:
-            if hasattr(self, "_resource_entries") and name in self._resource_entries:
-                continue
-            ctx.add_resource(
-                ResourceEntry(
-                    name=name,
-                    url=url,
-                    resource_type=ResourceType.JAVASCRIPT,
-                )
-            )
-
-        for name, url in self.default_css:
-            if hasattr(self, "_resource_entries") and name in self._resource_entries:
-                continue
-            ctx.add_resource(
-                ResourceEntry(
-                    name=name,
-                    url=url,
-                    resource_type=ResourceType.CSS,
-                )
-            )
-
-        super().render(**kwargs)
 
 
 class EventHandler(MacroElement):
@@ -474,11 +121,11 @@ class EventHandler(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name()}}.{{ this.method }}(
-                {{ this.event|tojson}},
+                {{ this.event|safe_js_value }},
                 {{ this.handler.js_code }}
             );
         {% endmacro %}
-    """)
+        """)
 
     def __init__(self, event: str, handler: JsCode, once: bool = False):
         super().__init__()
@@ -508,7 +155,7 @@ class IncludeStatement(MacroElement):
 
     _template = Template("""
         {{ this.leaflet_class_name }}.include(
-            {{ this.options | tojavascript }}
+            {{ this.options | safe_js_options }}
         )
     """)
 
@@ -528,9 +175,9 @@ class MethodCall(MacroElement):
         {% macro script(this, kwargs) %}
             {{ this.target }}.{{ this.method }}(
                 {% for arg in this.args %}
-                    {{ arg | tojavascript }},
+                    {{ arg | safe_js_value }},
                 {% endfor %}
-                {{ this.kwargs | tojavascript }}
+                {{ this.kwargs | safe_js_options }}
             );
         {% endmacro %}
     """)
@@ -541,13 +188,3 @@ class MethodCall(MacroElement):
         self.method = camelize(method)
         self.args = args
         self.kwargs = kwargs
-
-
-Figure = ResourceInjectingFigure
-"""公共 API 入口：folium.Figure / folium.elements.Figure 都是资源注入版 Figure。
-
-内部实现（folium.folium、folium.features、folium.map、folium.plugins.dual_map 等）
-仍然直接从 branca.element 导入 Figure，保持基类边界清晰，避免循环引用风险。
-第三方 isinstance(x, branca.element.Figure) 仍然成立，因为
-ResourceInjectingFigure 是 branca.element.Figure 的子类。
-"""

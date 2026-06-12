@@ -108,7 +108,7 @@ class VectorGridProtobuf(JSCSSMixin, Layer):
             var {{ this.get_name() }} = L.vectorGrid.protobuf(
                 '{{ this.url }}',
                 {%- if this.options is defined %}
-                    {{ this.options if this.options is string else this.options|tojavascript }}
+                    {{ this.options if this.options is string else this.options|safe_js_options }}
                 {%- endif %}
             );
             {%- endmacro %}

@@ -80,9 +80,9 @@ class Draw(JSCSSMixin, MacroElement):
 
         {% macro script(this, kwargs) %}
             var options = {
-              position: {{ this.position|tojson }},
-              draw: {{ this.draw_options|tojson }},
-              edit: {{ this.edit_options|tojson }},
+              position: {{ this.position|safe_js_value }},
+              draw: {{ this.draw_options|safe_js_value }},
+              edit: {{ this.edit_options|safe_js_value }},
             }
             {%- if this.feature_group  %}
                 var drawnItems_{{ this.get_name() }} =
@@ -131,7 +131,7 @@ class Draw(JSCSSMixin, MacroElement):
                     'href', 'data:' + convertedData
                 );
                 document.getElementById('export').setAttribute(
-                    'download', {{ this.filename|tojson }}
+                    'download', {{ this.filename|safe_js_value }}
                 );
             }
             {% endif %}

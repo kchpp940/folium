@@ -89,11 +89,11 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
             });
             {{this._parent.get_name()}}.timeDimension = L.timeDimension(
                 {
-                    period: {{ this.period|tojson }},
+                    period: {{ this.period|safe_js_value }},
                 }
             );
             var timeDimensionControl = new L.Control.TimeDimensionCustom(
-                {{ this.options|tojavascript }}
+                {{ this.options|safe_js_options }}
             );
             {{this._parent.get_name()}}.addControl(this.timeDimensionControl);
 
@@ -135,7 +135,7 @@ class TimestampedGeoJson(JSCSSMixin, MacroElement):
                 geoJsonLayer,
                 {
                     updateTimeDimension: true,
-                    addlastPoint: {{ this.add_last_point|tojson }},
+                    addlastPoint: {{ this.add_last_point|safe_js_value }},
                     duration: {{ this.duration }},
                 }
             ).addTo({{this._parent.get_name()}});
