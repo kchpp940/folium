@@ -362,20 +362,24 @@ class ResourceResolver:
 
         CDN 策略只需要返回 URL，不需要下载内容。
         仅当配置了 SHA256 校验时才下载内容进行验证。
+
+        如果没有 integrity，crossorigin 也设为 None（向后兼容），
+        因为 SRI 规范中 crossorigin 仅在 integrity 存在时才有意义。
         """
         if self.config.offline_mode:
             return self._resolve_cached(entry)
 
-        # 仅当需要 SHA256 校验时才下载内容
         if entry.sha256 is not None:
             self._download_with_cache(entry.url, entry.sha256)
+
+        crossorigin = entry.crossorigin if entry.integrity else None
 
         return ResolvedResource(
             name=entry.name,
             resource_type=entry.resource_type,
             url=entry.url,
             integrity=entry.integrity,
-            crossorigin=entry.crossorigin,
+            crossorigin=crossorigin,
             source="cdn",
         )
 
@@ -449,12 +453,14 @@ class ResourceResolver:
         if entry.sha256 is not None:
             self._download_with_cache(mirror_url, entry.sha256)
 
+        crossorigin = entry.crossorigin if entry.integrity else None
+
         return ResolvedResource(
             name=entry.name,
             resource_type=entry.resource_type,
             url=mirror_url,
             integrity=entry.integrity,
-            crossorigin=entry.crossorigin,
+            crossorigin=crossorigin,
             source="mirror",
         )
 
@@ -485,12 +491,13 @@ class ResourceResolver:
             raise RuntimeError(
                 f"Offline mode: cache not found for resource '{entry.name}'."
             )
+        crossorigin = entry.crossorigin if entry.integrity else None
         return ResolvedResource(
             name=entry.name,
             resource_type=entry.resource_type,
             url=entry.url,
             integrity=entry.integrity,
-            crossorigin=entry.crossorigin,
+            crossorigin=crossorigin,
             source="cache",
         )
 

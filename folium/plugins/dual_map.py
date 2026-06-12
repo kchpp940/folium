@@ -1,6 +1,6 @@
 from branca.element import Figure, MacroElement
 
-from folium.elements import EventHandler, JSCSSMixin
+from folium.elements import EventHandler, JSCSSMixin, ResourceInjectingFigure
 from folium.folium import Map
 from folium.map import LayerControl
 from folium.template import Template
@@ -81,7 +81,7 @@ class DualMap(JSCSSMixin, MacroElement):
             position="absolute",
             **kwargs,
         )
-        figure = Figure()
+        figure = ResourceInjectingFigure()
         figure.add_child(self.m1)
         figure.add_child(self.m2)
         # Important: add self to Figure last.

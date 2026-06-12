@@ -47,18 +47,14 @@ def get_or_create_resource_context(
     return ctx
 
 
-class InlineScript(MacroElement):
+class InlineScript(Element):
     """内联 JavaScript 脚本元素。
 
-    用于渲染 ResolvedResource 的内联内容。
-    渲染层只消费 ResolvedResource，不涉及策略决策。
+    从 ResolvedResource 创建，渲染层只消费已解析数据。
+    继承自 Element（非 MacroElement），使用直接模板。
     """
 
-    _template = Template("""
-        {% macro html(this, kwargs) %}
-            <script>{{ this.content }}</script>
-        {% endmacro %}
-    """)
+    _template = Template("<script>{{ this.content }}</script>")
 
     def __init__(self, content: str):
         super().__init__()
@@ -66,18 +62,14 @@ class InlineScript(MacroElement):
         self.content = content
 
 
-class InlineStyle(MacroElement):
+class InlineStyle(Element):
     """内联 CSS 样式元素。
 
-    用于渲染 ResolvedResource 的内联内容。
-    渲染层只消费 ResolvedResource，不涉及策略决策。
+    从 ResolvedResource 创建，渲染层只消费已解析数据。
+    继承自 Element（非 MacroElement），使用直接模板。
     """
 
-    _template = Template("""
-        {% macro html(this, kwargs) %}
-            <style>{{ this.content }}</style>
-        {% endmacro %}
-    """)
+    _template = Template("<style>{{ this.content }}</style>")
 
     def __init__(self, content: str):
         super().__init__()
@@ -89,16 +81,15 @@ class ResolvedJavascriptLink(JavascriptLink):
     """带 SRI 支持的 JavaScript 链接元素。
 
     从 ResolvedResource 创建，渲染层只消费已解析数据。
+    使用直接模板（与 JavascriptLink 一致），而不是 macro 模板。
     """
 
-    _template = Template("""
-        {% macro html(this, kwargs) %}
-            <script src="{{ this.url }}"
-                {%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}
-                {%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}>
-            </script>
-        {% endmacro %}
-    """)
+    _template = Template(
+        '<script src="{{ this.url }}"'
+        '{%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}'
+        '{%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}'
+        '></script>'
+    )
 
     def __init__(
         self,
@@ -115,15 +106,15 @@ class ResolvedCssLink(CssLink):
     """带 SRI 支持的 CSS 链接元素。
 
     从 ResolvedResource 创建，渲染层只消费已解析数据。
+    使用直接模板（与 CssLink 一致），而不是 macro 模板。
     """
 
-    _template = Template("""
-        {% macro html(this, kwargs) %}
-            <link rel="stylesheet" href="{{ this.url }}"
-                {%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}
-                {%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}>
-        {% endmacro %}
-    """)
+    _template = Template(
+        '<link rel="stylesheet" href="{{ this.url }}"'
+        '{%- if this.integrity %} integrity="{{ this.integrity }}"{% endif %}'
+        '{%- if this.crossorigin %} crossorigin="{{ this.crossorigin }}"{% endif %}'
+        '/>'
+    )
 
     def __init__(
         self,
@@ -197,13 +188,13 @@ def inject_all_resolved_resources(figure: Figure) -> None:
 
 
 class ResourceInjectingFigure(Figure):
-    """扩展 branca.Figure，自动注入已解析的资源。
+    """扩展 branca.Figure，统一走 resolve → inject 资源管线。
 
-    这是推荐使用的 Figure 类，它在 render() 时自动：
-    1. 解析 ResourceContext 中的所有资源
-    2. 将 ResolvedResource 注入到 header
+    所有策略（CDN/INLINE/LOCAL/MIRROR）均经过同一条数据流：
+        组件声明 ResourceEntry → ResourceContext 收集 → ResourceResolver 解析
+        → ResolvedResource → 渲染层只消费 ResolvedResource 注入 HTML
 
-    向后兼容：如果不需要资源管理功能，可以继续使用 branca.Figure。
+    JSCSSMixin 不再直接注入任何链接，只负责收集 ResourceEntry。
     """
 
     def __init__(
@@ -221,40 +212,36 @@ class ResourceInjectingFigure(Figure):
         return self._resource_context
 
     def _prepare_render(self, **kwargs) -> None:
-        """准备渲染：收集资源声明并注入已解析资源。
+        """准备渲染：收集资源声明 → 解析 → 注入。
 
-        流程：
-        1. 渲染所有子元素，触发 JSCSSMixin 收集资源声明
-           - CDN 策略：JSCSSMixin 直接注入资源到 header（向后兼容）
-           - 非 CDN 策略：JSCSSMixin 只收集到 ResourceContext，不注入
-        2. 对于非 CDN 策略，解析资源并注入到 header
+        统一流程（所有策略一致）：
+        1. 渲染所有子元素，触发 JSCSSMixin 收集 ResourceEntry
+        2. 通过 ResourceContext.resolve_all() 产出 ResolvedResource
+        3. 将 ResolvedResource 注入到 header
         """
-        # 第一步：渲染所有子元素，收集资源声明
         for name, child in self._children.items():
             child.render(**kwargs)
 
-        # 第二步：对于非 CDN 策略，解析并注入资源
-        if self._resource_context.strategy != ResourceStrategy.CDN:
-            self._inject_resolved_resources()
+        self._inject_resolved_resources()
 
     def render(self, **kwargs) -> str:
-        """渲染前先解析并注入所有资源。
-
-        避免了两次调用 super().render() 可能导致的副作用。
-        """
+        """渲染前统一解析并注入所有资源。"""
         self._prepare_render(**kwargs)
         return self._template.render(this=self, kwargs=kwargs)
 
     def _repr_html_(self, **kwargs) -> str:
-        """Jupyter 显示前先解析并注入所有资源。"""
+        """Jupyter 显示前统一解析并注入所有资源。"""
         self._prepare_render(**kwargs)
         return super()._repr_html_(**kwargs)
 
     def _inject_resolved_resources(self) -> None:
-        """解析并注入所有资源到 header。
+        """解析所有资源并注入到 header。
 
-        对于 INLINE/LOCAL/MIRROR 策略，JSCSSMixin 只收集资源声明
-        不直接注入，由此方法统一解析并注入。
+        所有策略统一走此路径：
+        - CDN: ResolvedJavascriptLink/ResolvedCssLink (带 URL + 可选 SRI)
+        - INLINE: InlineScript/InlineStyle (内联内容)
+        - LOCAL: ResolvedJavascriptLink/ResolvedCssLink (本地路径)
+        - MIRROR: ResolvedJavascriptLink/ResolvedCssLink (镜像 URL)
         """
         for resource in self._resource_context.resolve_all():
             inject_resolved_resource(self, resource)
@@ -319,6 +306,15 @@ class JSCSSMixin(MacroElement):
         self._resource_entries[entry.name] = entry
 
     def render(self, **kwargs):
+        """收集资源声明到 ResourceContext。
+
+        JSCSSMixin 不再直接注入任何链接到 header。
+        所有资源统一走 ResourceEntry → ResourceContext → Resolver
+        → ResolvedResource → 渲染层注入的管线。
+
+        旧的 default_js/default_css 自动转换为 ResourceEntry。
+        新的 declare_resource() 直接提供完整 ResourceEntry。
+        """
         figure = self.get_root()
         assert isinstance(
             figure, Figure
@@ -326,37 +322,12 @@ class JSCSSMixin(MacroElement):
 
         ctx = get_or_create_resource_context(figure)
 
-        # 获取资源策略，决定是否直接注入资源
-        # CDN 策略：直接注入（向后兼容）
-        # 非 CDN 策略：只收集到 ResourceContext，由 ResourceInjectingFigure 统一注入
-        strategy = getattr(ctx, "strategy", ResourceStrategy.CDN)
-        should_inject_directly = (strategy == ResourceStrategy.CDN)
-
         # 优先使用完整的 ResourceEntry（通过 declare_resource 声明的）
         if hasattr(self, "_resource_entries"):
             for entry in self._resource_entries.values():
                 ctx.add_resource(entry)
-                if should_inject_directly:
-                    if entry.resource_type == ResourceType.JAVASCRIPT:
-                        figure.header.add_child(
-                            ResolvedJavascriptLink(
-                                url=entry.url,
-                                integrity=entry.integrity,
-                                crossorigin=entry.crossorigin,
-                            ),
-                            name=entry.name,
-                        )
-                    else:
-                        figure.header.add_child(
-                            ResolvedCssLink(
-                                url=entry.url,
-                                integrity=entry.integrity,
-                                crossorigin=entry.crossorigin,
-                            ),
-                            name=entry.name,
-                        )
 
-        # 同时处理 default_js/default_css，确保向后兼容
+        # 将 default_js/default_css 转换为 ResourceEntry（向后兼容）
         for name, url in self.default_js:
             if hasattr(self, "_resource_entries") and name in self._resource_entries:
                 continue
@@ -367,8 +338,6 @@ class JSCSSMixin(MacroElement):
                     resource_type=ResourceType.JAVASCRIPT,
                 )
             )
-            if should_inject_directly:
-                figure.header.add_child(JavascriptLink(url), name=name)
 
         for name, url in self.default_css:
             if hasattr(self, "_resource_entries") and name in self._resource_entries:
@@ -380,8 +349,6 @@ class JSCSSMixin(MacroElement):
                     resource_type=ResourceType.CSS,
                 )
             )
-            if should_inject_directly:
-                figure.header.add_child(CssLink(url), name=name)
 
         super().render(**kwargs)
 

@@ -162,12 +162,17 @@ def cmd_download(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    """验证资源完整性命令。"""
+    """验证资源完整性命令。
+
+    复用 ResourceResolver.resolve() 走同一条数据流，
+    在离线模式下验证缓存文件的 SHA256 完整性。
+    """
     entries = _load_manifest(Path(args.manifest))
 
     config = ResourceResolverConfig(
         cache_dir=Path(args.cache_dir) if args.cache_dir else None,
         offline_mode=True,
+        audit_mode=True,
     )
     resolver = ResourceResolver(config=config)
 
@@ -177,25 +182,25 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     for entry in entries:
         try:
-            if entry.sha256:
-                cache_path = resolver._get_cache_path(entry.url)
-                if not cache_path.exists():
-                    print(f"  ? {entry.name}: not cached")
-                    missing_count += 1
-                    continue
-
-                content = cache_path.read_bytes()
-                try:
-                    ResourceResolver._verify_sha256(
-                        content, entry.sha256, entry.name
-                    )
-                    print(f"  ✓ {entry.name}: valid")
-                    valid_count += 1
-                except ValueError as e:
-                    print(f"  ✗ {e}", file=sys.stderr)
-                    invalid_count += 1
-            else:
+            if entry.sha256 is None:
                 print(f"  ~ {entry.name}: no SHA256 configured")
+                continue
+
+            cache_path = resolver._get_cache_path(entry.url)
+            if not cache_path.exists():
+                print(f"  ? {entry.name}: not cached")
+                missing_count += 1
+                continue
+
+            content = cache_path.read_bytes()
+            ResourceResolver._verify_sha256(
+                content, entry.sha256, entry.name
+            )
+            print(f"  ✓ {entry.name}: valid")
+            valid_count += 1
+        except ValueError as e:
+            print(f"  ✗ {e}", file=sys.stderr)
+            invalid_count += 1
         except Exception as e:
             print(f"  ✗ {entry.name}: {e}", file=sys.stderr)
             invalid_count += 1
