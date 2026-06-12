@@ -111,19 +111,13 @@ def cmd_export_manifest(args: argparse.Namespace) -> int:
                 )
             )
 
-    manifest = {
-        "version": "1.0",
-        "resources": [
-            {
-                "name": e.name,
-                "url": e.url,
-                "type": e.resource_type.value,
-                "sha256": e.sha256,
-                "fallback_urls": e.fallback_urls,
-            }
-            for e in entries
-        ],
-    }
+    # 复用 build_manifest 构建 manifest，确保与渲染管线读取同一批资源
+    from folium.resources import ResourceContext as _Ctx, build_manifest as _build
+
+    temp_ctx = _Ctx(strategy=ResourceStrategy.CDN)
+    for e in entries:
+        temp_ctx.add_resource(e)
+    manifest = _build(temp_ctx)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

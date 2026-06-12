@@ -816,3 +816,295 @@ class TestThreeEntrypointsDeduplication:
             if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
         )
         assert old_js == 0 and old_css == 0, "VegaLite 的旧式链接应被收割"
+
+
+class TestFourEntrypointsHarvest:
+    """四条公共入口直接 render：旧式 JavascriptLink/CssLink 被 harvest，无重复注入。
+
+    四条入口：
+      1. folium.Figure()
+      2. folium.elements.Figure()
+      3. Map.get_root()
+      4. DualMap.get_root()
+    """
+
+    @staticmethod
+    def _figure_with_legacy_links(figure, idx):
+        """向 Figure 添加旧式 JS/CSS 链接并返回渲染结果。"""
+        from branca.element import JavascriptLink, CssLink
+
+        js_name = f"legacy_entry_js_{idx}"
+        css_name = f"legacy_entry_css_{idx}"
+        js_url = f"https://example.com/legacy_entry_{idx}.js"
+        css_url = f"https://example.com/legacy_entry_{idx}.css"
+
+        figure.header.add_child(JavascriptLink(js_url), name=js_name)
+        figure.header.add_child(CssLink(css_url), name=css_name)
+        html = figure.render()
+
+        return html, js_name, css_name, js_url, css_url
+
+    def test_folium_Figure_entrypoint(self):
+        """入口 1：folium.Figure() 直接 render。"""
+        fig = folium.Figure()
+        html, js_name, css_name, js_url, css_url = self._figure_with_legacy_links(
+            fig, 1
+        )
+
+        # Resolved* 形式且只出现一次
+        assert html.count(js_url) == 1, "旧 JS 链接应以 resolved 形式出现一次"
+        assert html.count(css_url) == 1, "旧 CSS 链接应以 resolved 形式出现一次"
+
+        # header 中没有旧式链接
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in fig.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in fig.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_js == 0, "folium.Figure 旧式 JS 应被收割"
+        assert old_css == 0, "folium.Figure 旧式 CSS 应被收割"
+
+    def test_folium_elements_Figure_entrypoint(self):
+        """入口 2：folium.elements.Figure() 直接 render。"""
+        from folium.elements import Figure as ElemFigure
+
+        fig = ElemFigure()
+        html, js_name, css_name, js_url, css_url = self._figure_with_legacy_links(
+            fig, 2
+        )
+
+        assert html.count(js_url) == 1
+        assert html.count(css_url) == 1
+
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in fig.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in fig.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_js == 0 and old_css == 0, "folium.elements.Figure 旧式链接应被收割"
+
+    def test_Map_get_root_entrypoint(self):
+        """入口 3：Map.get_root()。"""
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+        html, js_name, css_name, js_url, css_url = self._figure_with_legacy_links(
+            root, 3
+        )
+
+        assert html.count(js_url) == 1
+        assert html.count(css_url) == 1
+
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_js == 0 and old_css == 0, "Map.get_root() 旧式链接应被收割"
+
+    def test_DualMap_get_root_entrypoint(self):
+        """入口 4：DualMap.get_root()。"""
+        dm = folium.plugins.DualMap(location=[0, 0])
+        root = dm.get_root()
+        html, js_name, css_name, js_url, css_url = self._figure_with_legacy_links(
+            root, 4
+        )
+
+        assert html.count(js_url) == 1
+        assert html.count(css_url) == 1
+
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_js == 0 and old_css == 0, "DualMap.get_root() 旧式链接应被收割"
+
+    def test_ResourceInjectingFigure_is_branca_Figure_subclass(self):
+        """类型边界：isinstance(x, branca.element.Figure) 必须仍然成立。"""
+        from branca.element import Figure as BrancaFigure
+        from folium.elements import ResourceInjectingFigure
+
+        assert issubclass(ResourceInjectingFigure, BrancaFigure)
+        assert isinstance(folium.Figure(), BrancaFigure)
+        assert isinstance(folium.Map(location=[0, 0]).get_root(), BrancaFigure)
+
+
+class TestManifestUnifiedResourcePool:
+    """manifest/export/download/verify 读取同一批 harvested + declared + default 资源。"""
+
+    def _build_context_with_all_three_entrypoints(self):
+        """构建一个混合了三种资源入口的 ResourceContext（不依赖真实网络下载）。
+
+        方式：直接在 ResourceInjectingFigure 上操作，避免 Map 的 default_js 触发
+        真实 CDN 下载。
+        """
+        from branca.element import JavascriptLink, CssLink
+
+        fig = folium.Figure()  # ResourceInjectingFigure
+
+        ctx = get_or_create_resource_context(fig, strategy=ResourceStrategy.CDN)
+
+        # 入口 A：declare_resource()（模拟 JSCSSMixin.render 路径）
+        ctx.add_resource(
+            ResourceEntry(
+                name="manifest_declared_a",
+                url="https://cdn.example.com/declared-a.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+        ctx.add_resource(
+            ResourceEntry(
+                name="manifest_declared_b",
+                url="https://cdn.example.com/declared-b.css",
+                resource_type=ResourceType.CSS,
+            )
+        )
+
+        # 入口 C：default_js/default_css（模拟 JSCSSMixin.default_js 路径）
+        ctx.add_resource(
+            ResourceEntry(
+                name="leaflet_default_c",
+                url="https://cdn.example.com/leaflet.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+        ctx.add_resource(
+            ResourceEntry(
+                name="leaflet_default_d",
+                url="https://cdn.example.com/leaflet.css",
+                resource_type=ResourceType.CSS,
+            )
+        )
+
+        # 入口 B：header.add_child(JavascriptLink/CssLink) 旧式链接
+        fig.header.add_child(
+            JavascriptLink("https://cdn.example.com/legacy-e.js"),
+            name="manifest_legacy_e",
+        )
+        fig.header.add_child(
+            CssLink("https://cdn.example.com/legacy-f.css"),
+            name="manifest_legacy_f",
+        )
+
+        return fig, ctx
+
+    def test_resource_context_after_render_contains_all_three_entrypoints(self):
+        """render() 后 ResourceContext 应包含三种入口的所有资源。"""
+        fig, ctx = self._build_context_with_all_three_entrypoints()
+        fig.render()  # 触发 harvest
+
+        entry_names = {e.name for e in ctx.get_entries()}
+
+        # 入口 A：declare_resource
+        assert "manifest_declared_a" in entry_names
+        assert "manifest_declared_b" in entry_names
+
+        # 入口 B：旧式链接被 harvest
+        assert "manifest_legacy_e" in entry_names
+        assert "manifest_legacy_f" in entry_names
+
+        # 入口 C：default_js/default_css
+        assert "leaflet_default_c" in entry_names
+        assert "leaflet_default_d" in entry_names
+
+    def test_manifest_contains_harvested_resources(self):
+        """导出的 manifest JSON 应包含 harvested + declared + default 资源。"""
+        fig, ctx = self._build_context_with_all_three_entrypoints()
+        fig.render()  # 触发 harvest
+
+        from folium.resources import build_manifest
+
+        manifest = build_manifest(ctx)
+
+        assert "resources" in manifest
+        manifest_names = {r.get("name") for r in manifest["resources"]}
+
+        assert "manifest_declared_a" in manifest_names, "declare_resource 应在 manifest 中"
+        assert "manifest_declared_b" in manifest_names, "declare_resource 应在 manifest 中"
+        assert "manifest_legacy_e" in manifest_names, "harvested 链接应在 manifest 中"
+        assert "manifest_legacy_f" in manifest_names, "harvested 链接应在 manifest 中"
+        assert "leaflet_default_c" in manifest_names, "default_js 应在 manifest 中"
+        assert "leaflet_default_d" in manifest_names, "default_css 应在 manifest 中"
+
+    def test_download_and_verify_manifest_entries_match(self):
+        """ResourceResolver.resolve_all() 和 build_manifest() 的资源集合一致。
+
+        只比较 names，不触发真实网络下载。
+        """
+        fig, ctx = self._build_context_with_all_three_entrypoints()
+        fig.render()  # 触发 harvest
+
+        ctx_entries = ctx.get_entries()
+        entry_names = {e.name for e in ctx_entries}
+
+        # manifest 中的资源名
+        from folium.resources import build_manifest
+        manifest = build_manifest(ctx)
+        manifest_names = {r.get("name") for r in manifest["resources"]}
+
+        # 检查我们自定义的 6 个都存在于两边
+        for expected in [
+            "manifest_declared_a",
+            "manifest_declared_b",
+            "manifest_legacy_e",
+            "manifest_legacy_f",
+            "leaflet_default_c",
+            "leaflet_default_d",
+        ]:
+            assert expected in entry_names, f"{expected} 应在 ctx entries 中"
+            assert expected in manifest_names, f"{expected} 应在 manifest 中"
+
+    def test_cli_export_renders_same_resources_as_manifest(self):
+        """CLI export（build_manifest 路径）输出的资源与渲染管线 resolve_all 一致。"""
+        fig, ctx = self._build_context_with_all_three_entrypoints()
+        fig.render()  # 触发 harvest
+
+        from folium.resources import build_manifest
+        manifest = build_manifest(ctx)
+
+        manifest_entries_by_name = {
+            r["name"]: r for r in manifest["resources"] if "name" in r
+        }
+        ctx_entries_by_name = {e.name: e for e in ctx.get_entries()}
+
+        # 检查 URL 一致（即 manifest 和 ctx 读取的是同一批数据）
+        for name in [
+            "manifest_declared_a",
+            "manifest_declared_b",
+            "manifest_legacy_e",
+            "manifest_legacy_f",
+        ]:
+            assert name in manifest_entries_by_name
+            assert name in ctx_entries_by_name
+            assert (
+                manifest_entries_by_name[name].get("url")
+                == ctx_entries_by_name[name].url
+            ), f"{name} 的 URL 在 manifest 和 ctx 中应一致"

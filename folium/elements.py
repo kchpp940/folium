@@ -541,3 +541,13 @@ class MethodCall(MacroElement):
         self.method = camelize(method)
         self.args = args
         self.kwargs = kwargs
+
+
+Figure = ResourceInjectingFigure
+"""公共 API 入口：folium.Figure / folium.elements.Figure 都是资源注入版 Figure。
+
+内部实现（folium.folium、folium.features、folium.map、folium.plugins.dual_map 等）
+仍然直接从 branca.element 导入 Figure，保持基类边界清晰，避免循环引用风险。
+第三方 isinstance(x, branca.element.Figure) 仍然成立，因为
+ResourceInjectingFigure 是 branca.element.Figure 的子类。
+"""

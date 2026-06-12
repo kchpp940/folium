@@ -595,20 +595,18 @@ class ResourceResolver:
         entries: Iterable[ResourceEntry],
         output_path: Union[str, Path],
     ) -> None:
-        """导出离线 manifest，供 CLI 工具使用。"""
-        manifest = {
-            "version": "1.0",
-            "resources": [
-                {
-                    "name": entry.name,
-                    "url": entry.url,
-                    "type": entry.resource_type.value,
-                    "sha256": entry.sha256,
-                    "fallback_urls": entry.fallback_urls,
-                }
-                for entry in entries
-            ],
-        }
+        """导出离线 manifest，供 CLI 工具使用。
+
+        复用 build_manifest() 统一 manifest 构建逻辑。
+        """
+        from folium.resources import ResourceContext as _Ctx
+
+        # 构建临时 ResourceContext 实例以复用 build_manifest
+        temp_ctx = _Ctx(strategy=ResourceStrategy.CDN)
+        for entry in entries:
+            temp_ctx.add_resource(entry)
+
+        manifest = build_manifest(temp_ctx)
         Path(output_path).write_text(
             json.dumps(manifest, indent=2),
             encoding="utf-8",
@@ -722,3 +720,39 @@ _global_registry = ResourceRegistry()
 def get_global_registry() -> ResourceRegistry:
     """获取全局资源注册表实例。"""
     return _global_registry
+
+
+def build_manifest(
+    ctx: ResourceContext,
+    version: str = "1.0",
+) -> dict:
+    """构建 manifest 字典。
+
+    CLI 的 export-manifest、download、verify 命令都通过此函数读取
+    ResourceContext 中的资源列表，确保与渲染管线（resolve_all）
+    消费的是同一批 ResourceEntry。
+
+    参数
+    ----
+    ctx : ResourceContext
+        已收集过资源的 ResourceContext 实例。
+    version : str
+        manifest schema 版本号。
+
+    返回
+    ----
+    dict : 可序列化为 JSON 的 manifest 字典。
+    """
+    return {
+        "version": version,
+        "resources": [
+            {
+                "name": entry.name,
+                "url": entry.url,
+                "type": entry.resource_type.value,
+                "sha256": entry.sha256,
+                "fallback_urls": entry.fallback_urls,
+            }
+            for entry in ctx.get_entries()
+        ],
+    }
