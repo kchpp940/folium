@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Optional
 
 from branca.element import (
     CssLink,
-    Element,  # NoQA: F401  needed as a reexport
+    Element,
     Figure,
     JavascriptLink,
     MacroElement,
@@ -187,6 +187,70 @@ def inject_all_resolved_resources(figure: Figure) -> None:
         inject_resolved_resource(figure, resource)
 
 
+def harvest_legacy_links(figure: Figure) -> None:
+    """扫描 Figure.header 中的旧式 JavascriptLink/CssLink，
+    转换为 ResourceEntry 并移除旧元素。
+
+    旧入口（如 features.py 中的 VegaLite）通过
+    figure.header.add_child(JavascriptLink(...)) 直接注入链接，
+    这些链接绕过了 ResourceContext/Resolver。此函数在渲染前
+    将它们纳入统一管线。
+
+    对普通 Figure 也能工作：如果没有 _resource_context，
+    自动创建一个。
+
+    转换规则：
+    - JavascriptLink → ResourceEntry(resource_type=JAVASCRIPT)
+    - CssLink → ResourceEntry(resource_type=CSS)
+    - 已有的 ResolvedJavascriptLink/ResolvedCssLink 保留不动
+    - 基于 name 去重：如果 ResourceContext 中已有同名资源，跳过
+    """
+    ctx = getattr(figure, "_resource_context", None)
+    if ctx is None:
+        ctx = get_or_create_resource_context(figure)
+
+    existing_names = {e.name for e in ctx._entries}
+
+    names_to_remove: list[str] = []
+    for name, child in list(figure.header._children.items()):
+        is_legacy_js = isinstance(child, JavascriptLink) and not isinstance(
+            child, ResolvedJavascriptLink
+        )
+        is_legacy_css = isinstance(child, CssLink) and not isinstance(
+            child, ResolvedCssLink
+        )
+
+        if not (is_legacy_js or is_legacy_css):
+            continue
+
+        url = child.url
+        if is_legacy_js:
+            resource_type = ResourceType.JAVASCRIPT
+        else:
+            resource_type = ResourceType.CSS
+
+        entry_name = name
+        if entry_name in existing_names:
+            names_to_remove.append(name)
+            continue
+
+        entry = ResourceEntry(
+            name=entry_name,
+            url=url,
+            resource_type=resource_type,
+        )
+        ctx.add_resource(entry)
+        existing_names.add(entry_name)
+        names_to_remove.append(name)
+
+    for name in names_to_remove:
+        del figure.header._children[name]
+
+    if names_to_remove and not isinstance(figure, ResourceInjectingFigure):
+        for resource in ctx.resolve_all():
+            inject_resolved_resource(figure, resource)
+
+
 class ResourceInjectingFigure(Figure):
     """扩展 branca.Figure，统一走 resolve → inject 资源管线。
 
@@ -212,16 +276,18 @@ class ResourceInjectingFigure(Figure):
         return self._resource_context
 
     def _prepare_render(self, **kwargs) -> None:
-        """准备渲染：收集资源声明 → 解析 → 注入。
+        """准备渲染：收集资源声明 → 收割旧式链接 → 解析 → 注入。
 
         统一流程（所有策略一致）：
         1. 渲染所有子元素，触发 JSCSSMixin 收集 ResourceEntry
-        2. 通过 ResourceContext.resolve_all() 产出 ResolvedResource
-        3. 将 ResolvedResource 注入到 header
+        2. 收割 header 中的旧式 JavascriptLink/CssLink
+        3. 通过 ResourceContext.resolve_all() 产出 ResolvedResource
+        4. 将 ResolvedResource 注入到 header
         """
         for name, child in self._children.items():
             child.render(**kwargs)
 
+        harvest_legacy_links(self)
         self._inject_resolved_resources()
 
     def render(self, **kwargs) -> str:

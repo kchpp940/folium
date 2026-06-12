@@ -90,9 +90,8 @@ class DualMap(JSCSSMixin, MacroElement):
         self.children_for_m2_copied = []  # list with ids
 
     def _repr_html_(self, **kwargs):
-        """Displays the HTML Map in a Jupyter notebook."""
         if self._parent is None:
-            self.add_to(Figure())
+            self.add_to(ResourceInjectingFigure())
             out = self._parent._repr_html_(**kwargs)
             self._parent = None
         else:

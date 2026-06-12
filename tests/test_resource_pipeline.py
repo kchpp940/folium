@@ -503,3 +503,316 @@ class TestTemplateRendering:
         assert "integrity" not in html
         assert "crossorigin" not in html
         assert '<script src="https://cdn.example.com/lib.js"></script>' == html.strip()
+
+
+class TestLegacyLinkHarvesting:
+    """旧式 JavascriptLink/CssLink 拦截和转换测试。"""
+
+    def test_legacy_javascript_link_harvested(self):
+        from branca.element import JavascriptLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+        root.header.add_child(
+            JavascriptLink("https://example.com/legacy.js"),
+            name="legacy_lib",
+        )
+        html = root.render()
+
+        from branca.element import JavascriptLink as _JavascriptLink
+
+        old_js = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        assert old_js == 0, "旧式 JavascriptLink 应被收割并移除"
+
+        ctx = root._resource_context
+        entries = ctx.get_entries()
+        entry_names = {e.name for e in entries}
+        assert "legacy_lib" in entry_names, "旧式链接应被转换为 ResourceEntry"
+
+        resolved = ctx.resolve_all()
+        resolved_names = {r.name for r in resolved}
+        assert "legacy_lib" in resolved_names, "旧式链接应被解析"
+
+        for r in resolved:
+            if r.name == "legacy_lib":
+                assert r.url == "https://example.com/legacy.js"
+                assert r.resource_type == ResourceType.JAVASCRIPT
+                assert r.source == "cdn"
+                break
+        else:
+            pytest.fail("legacy_lib not found in resolved resources")
+
+    def test_legacy_css_link_harvested(self):
+        from branca.element import CssLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+        root.header.add_child(
+            CssLink("https://example.com/legacy.css"),
+            name="legacy_css",
+        )
+        html = root.render()
+
+        from branca.element import CssLink as _CssLink
+
+        old_css = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_css == 0, "旧式 CssLink 应被收割并移除"
+
+    def test_legacy_links_resolved_and_injected(self):
+        from branca.element import JavascriptLink, CssLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+        root.header.add_child(
+            JavascriptLink("https://example.com/custom-a.js"),
+            name="custom_a",
+        )
+        root.header.add_child(
+            CssLink("https://example.com/custom-b.css"),
+            name="custom_b",
+        )
+        html = root.render()
+
+        assert "https://example.com/custom-a.js" in html
+        assert "https://example.com/custom-b.css" in html
+
+        resolved_elements = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, (ResolvedJavascriptLink, ResolvedCssLink))
+        )
+        assert resolved_elements >= 2, "resolved 元素应被注入到 header"
+
+
+class TestThreeEntrypointsDeduplication:
+    """三种入口混用去重且顺序不变的回归测试。
+
+    三种入口：
+    1. 直接 Figure.header.add_child(JavascriptLink/CssLink)
+    2. 普通插件默认资源（default_js/default_css）
+    3. declare_resource()
+
+    断言：
+    - 三种入口声明同名资源，最终 HTML 只输出一份
+    - 输出顺序：declare_resource > default_js/css > header.add_child
+    - 所有资源都走 ResolvedResource 链路
+    """
+
+    def test_three_entrypoints_same_name_deduplicated(self):
+        """三种入口声明同名资源，最终只输出一份。"""
+        from branca.element import JavascriptLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+
+        # 入口1：declare_resource
+        m.declare_resource(
+            ResourceEntry(
+                name="test_lib",
+                url="https://cdn.example.com/via-declare.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+
+        # 入口2：default_js（JSCSSMixin）- 同名
+        m.default_js.append(("test_lib", "https://cdn.example.com/via-default.js"))
+
+        # 入口3：直接 header.add_child - 同名
+        root.header.add_child(
+            JavascriptLink("https://cdn.example.com/via-header.js"),
+            name="test_lib",
+        )
+
+        html = root.render()
+
+        via_declare_count = html.count("https://cdn.example.com/via-declare.js")
+        via_default_count = html.count("https://cdn.example.com/via-default.js")
+        via_header_count = html.count("https://cdn.example.com/via-header.js")
+
+        # declare_resource 优先级最高，所以只输出 via-declare.js
+        assert via_declare_count == 1, f"declare_resource 的 URL 应出现 1 次，实际 {via_declare_count}"
+        assert via_default_count == 0, f"default_js 的 URL 不应出现，实际 {via_default_count}"
+        assert via_header_count == 0, f"header.add_child 的 URL 不应出现，实际 {via_header_count}"
+
+    def test_three_entrypoints_order_preserved(self):
+        """三种入口声明不同名资源，输出顺序为 declare > default > header。"""
+        from branca.element import JavascriptLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+
+        # 先清理 Map 默认资源，方便观察顺序
+        # 注意：保留 Map 原有的资源，我们新增额外的来测试顺序
+
+        # 入口1：declare_resource (添加 A)
+        m.declare_resource(
+            ResourceEntry(
+                name="entry_a",
+                url="https://cdn.example.com/entry-a.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+
+        # 入口2：default_js（JSCSSMixin）- 添加 B
+        m.default_js.append(("entry_b", "https://cdn.example.com/entry-b.js"))
+
+        # 入口3：直接 header.add_child - 添加 C
+        root.header.add_child(
+            JavascriptLink("https://cdn.example.com/entry-c.js"),
+            name="entry_c",
+        )
+
+        html = root.render()
+
+        # 确认都出现
+        assert "https://cdn.example.com/entry-a.js" in html
+        assert "https://cdn.example.com/entry-b.js" in html
+        assert "https://cdn.example.com/entry-c.js" in html
+
+        # 确认顺序：a 在 b 前，b 在 c 前
+        pos_a = html.find("https://cdn.example.com/entry-a.js")
+        pos_b = html.find("https://cdn.example.com/entry-b.js")
+        pos_c = html.find("https://cdn.example.com/entry-c.js")
+
+        assert pos_a >= 0 and pos_b >= 0 and pos_c >= 0
+        assert pos_a < pos_b < pos_c, (
+            f"资源顺序错误，应为 A < B < C，"
+            f"实际位置：A={pos_a}, B={pos_b}, C={pos_c}"
+        )
+
+    def test_three_entrypoints_all_are_resolved(self):
+        """三种入口声明的资源最终都以 Resolved* 形式存在，没有旧式链接。"""
+        from branca.element import JavascriptLink, CssLink
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+
+        # 入口1：declare_resource
+        m.declare_resource(
+            ResourceEntry(
+                name="dedupe_a",
+                url="https://cdn.example.com/dedupe-a.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+
+        # 入口2：default_js
+        m.default_js.append(("dedupe_b", "https://cdn.example.com/dedupe-b.js"))
+
+        # 入口3：直接 header.add_child
+        root.header.add_child(
+            JavascriptLink("https://cdn.example.com/dedupe-c.js"),
+            name="dedupe_c",
+        )
+        root.header.add_child(
+            CssLink("https://cdn.example.com/dedupe-d.css"),
+            name="dedupe_d",
+        )
+
+        html = root.render()
+
+        # 检查 header 中没有旧式链接
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+
+        assert old_js == 0, "不应有旧式 JavascriptLink"
+        assert old_css == 0, "不应有旧式 CssLink"
+
+        # 检查 Resolved* 元素存在
+        resolved_names = {
+            name: child
+            for name, child in root.header._children.items()
+            if isinstance(child, (ResolvedJavascriptLink, ResolvedCssLink))
+        }
+
+        for expected_name in ["dedupe_a", "dedupe_b", "dedupe_c", "dedupe_d"]:
+            assert expected_name in resolved_names, (
+                f"{expected_name} 应以 Resolved* 形式存在"
+            )
+
+    def test_mixed_with_vegalite_legacy_links(self):
+        """与 features.py 中 VegaLite 的旧式链接混用的集成测试。"""
+        try:
+            from folium.features import VegaLite
+        except ImportError:
+            pytest.skip("VegaLite not available")
+
+        from branca.element import Figure as BrancaFigure
+
+        m = folium.Map(location=[0, 0])
+        root = m.get_root()
+
+        # declare_resource 添加一个资源
+        m.declare_resource(
+            ResourceEntry(
+                name="my_custom_lib",
+                url="https://cdn.example.com/my-lib.js",
+                resource_type=ResourceType.JAVASCRIPT,
+            )
+        )
+
+        # 添加一个 VegaLite 元素（它会在 render 时往 header 加 vega 等 JavascriptLink）
+        vega_spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+            "description": "A simple bar chart with embedded data.",
+            "data": {
+                "values": [
+                    {"a": "A", "b": 28},
+                    {"a": "B", "b": 55},
+                ]
+            },
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "a", "type": "nominal"},
+                "y": {"field": "b", "type": "quantitative"},
+            },
+        }
+        VegaLite(vega_spec, width="400px", height="300px").add_to(root)
+
+        html = root.render()
+
+        # 检查 my_custom_lib 被解析
+        ctx = root._resource_context
+        entries = ctx.get_entries()
+        entry_names = {e.name for e in entries}
+        assert "my_custom_lib" in entry_names
+
+        # 检查 VegaLite 注入的旧式 vega 链接也被收割了
+        # (它们可能叫 "vega", "vega-lite", "vega-embed")
+        for expected in ["vega", "vega-lite", "vega-embed"]:
+            assert expected in entry_names or any(
+                expected in name.lower() for name in entry_names
+            ), f"VegaLite 的 {expected} 资源应被收割"
+
+        # 检查 HTML 中没有旧式链接
+        from branca.element import JavascriptLink as _JavascriptLink, CssLink as _CssLink
+
+        old_js = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _JavascriptLink) and not isinstance(c, ResolvedJavascriptLink)
+        )
+        old_css = sum(
+            1
+            for _, c in root.header._children.items()
+            if isinstance(c, _CssLink) and not isinstance(c, ResolvedCssLink)
+        )
+        assert old_js == 0 and old_css == 0, "VegaLite 的旧式链接应被收割"

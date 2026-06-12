@@ -361,9 +361,8 @@ class Map(JSCSSMixin, Evented):
             self.add_child(tile_layer, name=tile_layer.tile_name)
 
     def _repr_html_(self, **kwargs) -> str:
-        """Displays the HTML Map in a Jupyter notebook."""
         if self._parent is None:
-            self.add_to(Figure())
+            self.add_to(ResourceInjectingFigure())
             self._parent: Figure
             out = self._parent._repr_html_(**kwargs)
             self._parent = None
