@@ -57,7 +57,7 @@ from folium.safe_serialize import (
     safe_css_value,
     safe_html,
     safe_text,
-    trusted_html,
+    trusted_html as _trusted_html_func,
     _escape_js_string_for_html,
 )
 from folium.vector_layers import Circle, CircleMarker, PolyLine, path_options
@@ -1734,15 +1734,40 @@ class DivIcon(MacroElement):
         A custom class name to assign to the icon.
         Leaflet defaults is 'leaflet-div-icon' which draws a little white
         square with a shadow.  We set it 'empty' in folium.
-    html : string or None, default None
-        A custom HTML code to put inside the div element. Treated as
-        trusted HTML (no sanitization). Use with caution.
+    html : string, Element, JsCode, or None, default None
+        Custom HTML content to put inside the div element.
+        - If **string** (default path): content is sanitized with a
+          tag/attribute whitelist (safe_html). Set `trusted_html=True`
+          to explicitly opt out of sanitization.
+        - If **Element** or **JsCode**: treated as fully trusted content,
+          no sanitization is applied. The user is responsible for safety.
     text : string or None, default None
-        Plain text content to put inside the div element. HTML-escaped
-        for safety. If provided, takes precedence over `html`.
+        Plain text content to put inside the div element. If provided,
+        takes precedence over `html`.
+        - If `is_html=False` (default): content is fully HTML-escaped
+          (safe_text). All tags are displayed literally.
+        - If `is_html=True`: content is treated as HTML and sanitized
+          with a tag/attribute whitelist (safe_html).
     is_html : bool, default False
-        If True and `text` is provided, the text is treated as HTML
-        content and sanitized with a tag/attribute whitelist.
+        Only applies when `text` is provided. Controls whether `text`
+        is treated as plain text (escaped) or HTML (sanitized).
+        **Cannot** be combined with `html` or `trusted_html`.
+    trusted_html : bool, default False
+        Only applies when `html` is a string. If True, the HTML content
+        is treated as fully trusted and no sanitization is applied.
+        This is the explicit opt-in flag to bypass the whitelist.
+        **Cannot** be combined with `text` or when `html` is already
+        an Element/JsCode (those are implicitly trusted).
+
+    Security Notes
+    --------------
+    Default behavior (no flags set) is safe:
+    - `text="..."` → fully escaped (display literally)
+    - `html="..."` → whitelist-sanitized (only safe tags/attrs pass)
+
+    To get fully untrusted HTML, you must explicitly opt in via EITHER:
+    - `trusted_html=True` (when `html` is a string)
+    - Passing an `Element` or `JsCode` object as `html`
 
     See https://leafletjs.com/reference.html#divicon
 
@@ -1756,9 +1781,10 @@ class DivIcon(MacroElement):
 
     def __init__(
         self,
-        html: Optional[str] = None,
+        html: Optional[Union[str, Element, JsCode]] = None,
         text: Optional[str] = None,
         is_html: bool = False,
+        trusted_html: bool = False,
         icon_size: Optional[tuple[int, int]] = None,
         icon_anchor: Optional[tuple[int, int]] = None,
         popup_anchor: Optional[tuple[int, int]] = None,
@@ -1767,15 +1793,66 @@ class DivIcon(MacroElement):
         super().__init__()
         self._name = "DivIcon"
 
+        # =====================================================================
+        # Parameter compatibility assertions — prevent semantic bypass
+        # =====================================================================
+
+        # Rule 1: text and html cannot both be provided (ambiguous precedence)
+        if text is not None and html is not None:
+            raise ValueError(
+                "`text` and `html` cannot both be provided. "
+                "Use `text` for plain/sanitized text, or `html` for HTML content."
+            )
+
+        # Rule 2: is_html only applies to `text` — makes no sense with `html`
+        if is_html and html is not None:
+            raise ValueError(
+                "`is_html=True` can only be used with `text` parameter. "
+                "For `html`, use `trusted_html=True` to bypass whitelist sanitization."
+            )
+
+        # Rule 3: trusted_html only applies to string `html`, not to text
+        if trusted_html and text is not None:
+            raise ValueError(
+                "`trusted_html=True` can only be used with `html` parameter (string). "
+                "For `text` with HTML, use `is_html=True` instead."
+            )
+
+        # Rule 4: trusted_html is redundant (and confusing) when html is Element/JsCode
+        if trusted_html and isinstance(html, (Element, JsCode)):
+            raise ValueError(
+                "`trusted_html=True` is not needed when `html` is already an "
+                "Element/JsCode object — those are implicitly trusted. "
+                "Remove the `trusted_html=True` flag."
+            )
+
+        # =====================================================================
+        # Three-path processing pipeline
+        # =====================================================================
+
         processed_html: Optional[JsCode] = None
+
         if text is not None:
+            # --- Path 1: text parameter (safe_text / sanitized_html) ---
             if is_html:
                 html_content = safe_html(str(text))
             else:
                 html_content = safe_text(str(text))
             processed_html = JsCode(_escape_js_string_for_html(html_content))
+
         elif html is not None:
-            html_content = trusted_html(str(html))
+            if isinstance(html, (Element, JsCode)):
+                # --- Path 2a: Element/JsCode (implicitly trusted) ---
+                if isinstance(html, Element):
+                    html_content = _trusted_html_func(html.render())
+                else:
+                    html_content = _trusted_html_func(str(html.js_code))
+            elif trusted_html:
+                # --- Path 2b: string + trusted_html=True (explicit opt-in) ---
+                html_content = _trusted_html_func(str(html))
+            else:
+                # --- Path 2c: string (default → whitelist sanitization) ---
+                html_content = safe_html(str(html))
             processed_html = JsCode(_escape_js_string_for_html(html_content))
 
         self.options = remove_empty(

@@ -106,6 +106,10 @@ _SAFE_HTML_TAGS = {
     "hr", "i", "img", "li", "ol", "p", "pre", "span", "strong", "table",
     "tbody", "td", "tfoot", "th", "thead", "tr", "ul", "small", "sub",
     "sup",
+    # SVG tags (common in custom markers/icons):
+    "svg", "circle", "rect", "ellipse", "line", "polyline", "polygon",
+    "path", "text", "g", "defs", "clippath", "use", "lineargradient",
+    "radialgradient", "stop",
 }
 
 # HTML attribute whitelist (global + per-tag)
@@ -119,6 +123,39 @@ _SAFE_HTML_ATTRS_BY_TAG = {
     "table": {"cellpadding", "cellspacing", "width", "border"},
     "col": {"span", "width"},
     "colgroup": {"span", "width"},
+    # SVG core attributes:
+    "svg": {"xmlns", "viewbox", "width", "height", "preserveaspectratio"},
+    "circle": {"cx", "cy", "r", "fill", "stroke", "stroke-width",
+              "stroke-linecap", "stroke-linejoin", "stroke-opacity",
+              "fill-opacity", "opacity"},
+    "rect": {"x", "y", "width", "height", "rx", "ry", "fill", "stroke",
+             "stroke-width", "stroke-linecap", "stroke-linejoin",
+             "stroke-opacity", "fill-opacity", "opacity"},
+    "ellipse": {"cx", "cy", "rx", "ry", "fill", "stroke", "stroke-width",
+                "stroke-opacity", "fill-opacity", "opacity"},
+    "line": {"x1", "y1", "x2", "y2", "stroke", "stroke-width",
+             "stroke-linecap", "stroke-opacity", "opacity"},
+    "polyline": {"points", "fill", "stroke", "stroke-width",
+                 "stroke-linecap", "stroke-linejoin", "stroke-opacity",
+                 "fill-opacity", "opacity"},
+    "polygon": {"points", "fill", "stroke", "stroke-width",
+                "stroke-linecap", "stroke-linejoin", "stroke-opacity",
+                "fill-opacity", "opacity"},
+    "path": {"d", "fill", "stroke", "stroke-width", "stroke-linecap",
+             "stroke-linejoin", "stroke-opacity", "fill-opacity", "opacity"},
+    "text": {"x", "y", "font-family", "font-size", "font-weight",
+             "text-anchor", "dominant-baseline", "fill", "stroke",
+             "stroke-width", "opacity"},
+    "g": {"transform", "fill", "stroke", "stroke-width", "opacity"},
+    "defs": set(),
+    "clippath": set(),
+    "use": {"href", "xlink:href", "x", "y", "width", "height",
+            "transform", "opacity"},
+    "lineargradient": {"x1", "y1", "x2", "y2", "gradientunits",
+                       "gradienttransform", "spreadmethod", "id"},
+    "radialgradient": {"cx", "cy", "r", "fx", "fy", "gradientunits",
+                       "gradienttransform", "spreadmethod", "id"},
+    "stop": {"offset", "stop-color", "stop-opacity"},
 }
 
 # Attributes that contain URLs (require extra validation)
