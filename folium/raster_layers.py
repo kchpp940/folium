@@ -13,20 +13,12 @@ from folium.utilities import (
     TypeBounds,
     TypeBoundsReturn,
     TypeJsonValue,
-    TypeJsonValueNoNone,
     image_to_url,
     mercator_transform,
     normalize_bounds_type,
     parse_options,
     remove_empty,
 )
-
-__all__ = [
-    "TileLayer",
-    "WmsTileLayer",
-    "ImageOverlay",
-    "VideoOverlay",
-]
 
 
 class TileLayer(Layer):
@@ -115,28 +107,50 @@ class TileLayer(Layer):
         opacity: float = 1,
         **kwargs,
     ):
-        config = _RasterLayerConfig.for_tile_layer(
-            tiles=tiles,
-            min_zoom=min_zoom,
-            max_zoom=max_zoom,
-            max_native_zoom=max_native_zoom,
-            attr=attr,
-            detect_retina=detect_retina,
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
+        if isinstance(tiles, str):
+            if tiles.lower() == "openstreetmap":
+                tiles = "OpenStreetMap Mapnik"
+                if name is None:
+                    name = "openstreetmap"
+            try:
+                tiles = xyzservices.providers.query_name(tiles)
+            except ValueError:
+                # no match, likely a custom URL
+                pass
+
+        if isinstance(tiles, xyzservices.TileProvider):
+            attr = attr if attr else tiles.html_attribution  # type: ignore
+            min_zoom = min_zoom or tiles.get("min_zoom")
+            max_zoom = max_zoom or tiles.get("max_zoom")
+            subdomains = tiles.get("subdomains", subdomains)
+            if name is None:
+                name = tiles.name.replace(".", "").lower()
+            tiles = tiles.build_url(fill_subdomain=False, scale_factor="{r}")  # type: ignore
+
+        self.tile_name = (
+            name if name is not None else "".join(tiles.lower().strip().split())
+        )
+        super().__init__(
+            name=self.tile_name, overlay=overlay, control=control, show=show
+        )
+        self._name = "TileLayer"
+
+        self.tiles = tiles
+        if not attr:
+            raise ValueError("Custom tiles must have an attribution.")
+
+        self.options = remove_empty(
+            min_zoom=min_zoom or 0,
+            max_zoom=max_zoom or 18,
+            max_native_zoom=max_native_zoom or max_zoom or 18,
             no_wrap=no_wrap,
+            attribution=attr,
             subdomains=subdomains,
+            detect_retina=detect_retina,
             tms=tms,
             opacity=opacity,
             **kwargs,
         )
-        super().__init__(**config.layer_kwargs)
-        self._name = "TileLayer"
-        self.tile_name = config.layer_kwargs["name"]
-        self.tiles = config._resource_ref  # type: ignore[attr-defined]
-        self.options = config.options
 
 
 class WmsTileLayer(Layer):
@@ -200,23 +214,21 @@ class WmsTileLayer(Layer):
         show: bool = True,
         **kwargs,
     ):
-        config = _RasterLayerConfig.for_wms_tile_layer(
-            url=url,
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
+        self.url = url
+        kwargs["format"] = fmt
+        cql_filter = kwargs.pop("cql_filter", None)
+        self.options = parse_options(
             layers=layers,
             styles=styles,
-            fmt=fmt,
             transparent=transparent,
             version=version,
-            attr=attr,
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
+            attribution=attr,
             **kwargs,
         )
-        super().__init__(**config.layer_kwargs)
-        self.url = config._resource_ref  # type: ignore[attr-defined]
-        self.options = config.options
+        # special parameter that shouldn't be camelized
+        if cql_filter:
+            self.options["cql_filter"] = cql_filter
 
 
 class ImageOverlay(Layer):
@@ -309,18 +321,10 @@ class ImageOverlay(Layer):
         show: bool = True,
         **kwargs,
     ):
-        config = _RasterLayerConfig.for_image_overlay(
-            bounds=bounds,
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
-            **kwargs,
-        )
-        super().__init__(**config.layer_kwargs)
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "ImageOverlay"
         self.bounds = bounds
-        self.options = config.options
+        self.options = remove_empty(**kwargs)
         self.pixelated = pixelated
         if mercator_project:
             image = mercator_transform(
@@ -387,21 +391,12 @@ class VideoOverlay(Layer):
         show: bool = True,
         **kwargs: TypeJsonValue,
     ):
-        config = _RasterLayerConfig.for_video_overlay(
-            bounds=bounds,
-            autoplay=autoplay,
-            loop=loop,
-            name=name,
-            overlay=overlay,
-            control=control,
-            show=show,
-            **kwargs,
-        )
-        super().__init__(**config.layer_kwargs)
+        super().__init__(name=name, overlay=overlay, control=control, show=show)
         self._name = "VideoOverlay"
         self.video_url = video_url
+
         self.bounds = bounds
-        self.options = config.options
+        self.options = remove_empty(autoplay=autoplay, loop=loop, **kwargs)
 
     def _get_self_bounds(self) -> TypeBoundsReturn:
         """
@@ -410,252 +405,3 @@ class VideoOverlay(Layer):
 
         """
         return normalize_bounds_type(self.bounds)
-
-
-class _RasterLayerConfig:
-    """Internal configuration builder for raster layers.
-
-    This is a private implementation detail — do not rely on it being
-    stable or publicly accessible.
-
-    Encapsulates the full common pipeline shared by TileLayer, WmsTileLayer,
-    ImageOverlay, and VideoOverlay:
-
-    1. Display state normalization (name, overlay, control, show)
-    2. Attribution normalization (attr → attribution)
-    3. Bounds normalization
-    4. Leaflet options building (with camelize strategy sealed inside)
-
-    Each factory method encapsulates its type-specific logic — provider
-    resolution, key mapping, camelize strategy — so that callers never
-    pass ``camelize`` or ``preserve_names`` flags.
-    """
-
-    __slots__ = ("_layer_kwargs", "_options", "_bounds", "_attribution", "_resource_ref")
-
-    def __init__(self) -> None:
-        self._layer_kwargs: dict[str, Any] = {}
-        self._options: dict[str, TypeJsonValueNoNone] = {}
-        self._bounds: Optional[TypeBoundsReturn] = None
-        self._attribution: Optional[str] = None
-        self._resource_ref: Optional[str] = None
-
-    @classmethod
-    def for_tile_layer(
-        cls,
-        tiles: Union[str, xyzservices.TileProvider] = "OpenStreetMap",
-        min_zoom: Optional[int] = None,
-        max_zoom: Optional[int] = None,
-        max_native_zoom: Optional[int] = None,
-        attr: Optional[str] = None,
-        detect_retina: bool = False,
-        name: Optional[str] = None,
-        overlay: bool = False,
-        control: bool = True,
-        show: bool = True,
-        no_wrap: bool = False,
-        subdomains: str = "abc",
-        tms: bool = False,
-        opacity: float = 1,
-        **kwargs: TypeJsonValue,
-    ) -> "_RasterLayerConfig":
-        config = cls()
-
-        if isinstance(tiles, str):
-            if tiles.lower() == "openstreetmap":
-                tiles = "OpenStreetMap Mapnik"
-                if name is None:
-                    name = "openstreetmap"
-            try:
-                tiles = xyzservices.providers.query_name(tiles)
-            except ValueError:
-                pass
-
-        if isinstance(tiles, xyzservices.TileProvider):
-            attr = attr if attr else tiles.html_attribution  # type: ignore
-            min_zoom = min_zoom or tiles.get("min_zoom")
-            max_zoom = max_zoom or tiles.get("max_zoom")
-            subdomains = tiles.get("subdomains", subdomains)
-            if name is None:
-                name = tiles.name.replace(".", "").lower()
-            tiles = tiles.build_url(fill_subdomain=False, scale_factor="{r}")  # type: ignore
-
-        tile_name = (
-            name if name is not None else "".join(tiles.lower().strip().split())
-        )
-
-        config._attribution = attr
-        if not attr:
-            raise ValueError("Custom tiles must have an attribution.")
-
-        config._layer_kwargs = {
-            "name": tile_name,
-            "overlay": overlay,
-            "control": control,
-            "show": show,
-        }
-
-        config._options = cls._build_options(
-            layer_options={
-                "min_zoom": min_zoom or 0,
-                "max_zoom": max_zoom or 18,
-                "max_native_zoom": max_native_zoom or max_zoom or 18,
-                "no_wrap": no_wrap,
-                "attribution": attr,
-                "subdomains": subdomains,
-                "detect_retina": detect_retina,
-                "tms": tms,
-                "opacity": opacity,
-            },
-            extra_options=kwargs,
-            camelize=False,
-        )
-
-        config._resource_ref = tiles  # type: ignore[attr-defined]
-        return config
-
-    @classmethod
-    def for_wms_tile_layer(
-        cls,
-        url: str,
-        layers: str,
-        styles: str = "",
-        fmt: str = "image/jpeg",
-        transparent: bool = False,
-        version: str = "1.1.1",
-        attr: str = "",
-        name: Optional[str] = None,
-        overlay: bool = True,
-        control: bool = True,
-        show: bool = True,
-        **kwargs: TypeJsonValue,
-    ) -> "_RasterLayerConfig":
-        config = cls()
-
-        kwargs["format"] = fmt
-
-        config._attribution = attr if attr else None
-        config._layer_kwargs = {
-            "name": name,
-            "overlay": overlay,
-            "control": control,
-            "show": show,
-        }
-
-        config._options = cls._build_options(
-            layer_options={
-                "layers": layers,
-                "styles": styles,
-                "transparent": transparent,
-                "version": version,
-                "attribution": attr,
-            },
-            extra_options=kwargs,
-            camelize=True,
-            preserve_names=["cql_filter"],
-        )
-
-        config._resource_ref = url  # type: ignore[attr-defined]
-        return config
-
-    @classmethod
-    def for_image_overlay(
-        cls,
-        bounds: TypeBounds,
-        name: Optional[str] = None,
-        overlay: bool = True,
-        control: bool = True,
-        show: bool = True,
-        **kwargs: TypeJsonValue,
-    ) -> "_RasterLayerConfig":
-        config = cls()
-
-        config._bounds = normalize_bounds_type(bounds)
-        config._layer_kwargs = {
-            "name": name,
-            "overlay": overlay,
-            "control": control,
-            "show": show,
-        }
-
-        config._options = cls._build_options(
-            layer_options={},
-            extra_options=kwargs,
-            camelize=False,
-        )
-
-        return config
-
-    @classmethod
-    def for_video_overlay(
-        cls,
-        bounds: TypeBounds,
-        autoplay: bool = True,
-        loop: bool = True,
-        name: Optional[str] = None,
-        overlay: bool = True,
-        control: bool = True,
-        show: bool = True,
-        **kwargs: TypeJsonValue,
-    ) -> "_RasterLayerConfig":
-        config = cls()
-
-        config._bounds = normalize_bounds_type(bounds)
-        config._layer_kwargs = {
-            "name": name,
-            "overlay": overlay,
-            "control": control,
-            "show": show,
-        }
-
-        config._options = cls._build_options(
-            layer_options={
-                "autoplay": autoplay,
-                "loop": loop,
-            },
-            extra_options=kwargs,
-            camelize=False,
-        )
-
-        return config
-
-    @staticmethod
-    def _build_options(
-        layer_options: dict[str, TypeJsonValue],
-        extra_options: dict[str, TypeJsonValue],
-        camelize: bool = False,
-        preserve_names: Optional[list[str]] = None,
-    ) -> dict[str, TypeJsonValueNoNone]:
-        all_options: dict[str, TypeJsonValue] = {}
-        all_options.update(layer_options)
-        all_options.update(extra_options)
-
-        preserve_names = preserve_names or []
-        preserved: dict[str, TypeJsonValue] = {}
-        for key in preserve_names:
-            if key in all_options:
-                preserved[key] = all_options.pop(key)
-
-        if camelize:
-            options = parse_options(**all_options)
-        else:
-            options = remove_empty(**all_options)
-
-        options.update({k: v for k, v in preserved.items() if v is not None})
-        return options
-
-    @property
-    def layer_kwargs(self) -> dict[str, Any]:
-        return self._layer_kwargs
-
-    @property
-    def options(self) -> dict[str, TypeJsonValueNoNone]:
-        return self._options
-
-    @property
-    def bounds(self) -> Optional[TypeBoundsReturn]:
-        return self._bounds
-
-    @property
-    def attribution(self) -> Optional[str]:
-        return self._attribution

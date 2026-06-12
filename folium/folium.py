@@ -10,7 +10,8 @@ from typing import Any, Optional, Union
 
 from branca.element import Element, Figure
 
-from folium.elements import JSCSSMixin
+from folium.elements import JSCSSMixin, ResourceInjectingFigure
+from folium.resources import ResourceContext, ResourceStrategy
 from folium.map import Evented, FitBounds, Layer
 from folium.raster_layers import TileLayer
 from folium.template import Template
@@ -292,6 +293,7 @@ class Map(JSCSSMixin, Evented):
         png_enabled: bool = False,
         zoom_control: Union[bool, str] = True,
         font_size: str = "1rem",
+        resource_strategy: ResourceStrategy = ResourceStrategy.CDN,
         **kwargs: TypeJsonValue,
     ):
         super().__init__()
@@ -307,7 +309,8 @@ class Map(JSCSSMixin, Evented):
         else:
             self.location = validate_location(location)
 
-        Figure().add_child(self)
+        self._resource_strategy = resource_strategy
+        ResourceInjectingFigure(resource_strategy=resource_strategy).add_child(self)
 
         # Map Size Parameters.
         self.width = _parse_size(width)
@@ -500,3 +503,63 @@ class Map(JSCSSMixin, Evented):
         """
         for obj in args:
             self.objects_to_stay_in_front.append(obj)
+
+    @property
+    def resource_context(self) -> ResourceContext:
+        """获取资源上下文，用于高级资源管理配置。
+
+        通过资源上下文可以：
+        - 设置资源策略（CDN/LOCAL/INLINE/MIRROR）
+        - 配置企业内网镜像
+        - 启用审计模式
+        - 导出离线 manifest
+        """
+        figure = self.get_root()
+        if hasattr(figure, "resource_context"):
+            return figure.resource_context
+        from folium.elements import get_or_create_resource_context
+
+        return get_or_create_resource_context(figure, self._resource_strategy)
+
+    def set_resource_strategy(self, strategy: ResourceStrategy) -> None:
+        """设置资源加载策略。
+
+        Parameters
+        ----------
+        strategy : ResourceStrategy
+            资源加载策略：
+            - ResourceStrategy.CDN: 使用远程 CDN（默认）
+            - ResourceStrategy.LOCAL: 使用本地文件
+            - ResourceStrategy.INLINE: 内联到 HTML
+            - ResourceStrategy.MIRROR: 使用企业内网镜像
+        """
+        self._resource_strategy = strategy
+        ctx = self.resource_context
+        ctx.set_strategy(strategy)
+
+    def enable_audit_mode(self) -> None:
+        """启用审计模式，记录所有资源访问。"""
+        self.resource_context.audit_mode = True
+
+    def disable_audit_mode(self) -> None:
+        """禁用审计模式。"""
+        self.resource_context.audit_mode = False
+
+    def get_audit_log(self) -> list[dict]:
+        """获取审计日志。"""
+        return self.resource_context.get_audit_log()
+
+    def export_resource_manifest(self, output_path: str) -> None:
+        """导出资源 manifest，供离线使用或 CLI 工具处理。"""
+        self.resource_context.export_manifest(output_path)
+
+    def configure_mirror(self, mirror_base_url: str) -> None:
+        """配置企业内网镜像。
+
+        Parameters
+        ----------
+        mirror_base_url : str
+            镜像服务器的基础 URL，例如 "https://mirror.example.com/assets/"
+        """
+        self.resource_context.resolver.config.mirror_base_url = mirror_base_url
+        self.set_resource_strategy(ResourceStrategy.MIRROR)
