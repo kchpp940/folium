@@ -53,7 +53,13 @@ from folium.utilities import (
     remove_empty,
     validate_locations,
 )
-from folium.safe_serialize import safe_css_value, safe_html
+from folium.safe_serialize import (
+    safe_css_value,
+    safe_html,
+    safe_text,
+    trusted_html,
+    _escape_js_string_for_html,
+)
 from folium.vector_layers import Circle, CircleMarker, PolyLine, path_options
 
 
@@ -1728,8 +1734,15 @@ class DivIcon(MacroElement):
         A custom class name to assign to the icon.
         Leaflet defaults is 'leaflet-div-icon' which draws a little white
         square with a shadow.  We set it 'empty' in folium.
-    html : string
-        A custom HTML code to put inside the div element.
+    html : string or None, default None
+        A custom HTML code to put inside the div element. Treated as
+        trusted HTML (no sanitization). Use with caution.
+    text : string or None, default None
+        Plain text content to put inside the div element. HTML-escaped
+        for safety. If provided, takes precedence over `html`.
+    is_html : bool, default False
+        If True and `text` is provided, the text is treated as HTML
+        content and sanitized with a tag/attribute whitelist.
 
     See https://leafletjs.com/reference.html#divicon
 
@@ -1744,6 +1757,8 @@ class DivIcon(MacroElement):
     def __init__(
         self,
         html: Optional[str] = None,
+        text: Optional[str] = None,
+        is_html: bool = False,
         icon_size: Optional[tuple[int, int]] = None,
         icon_anchor: Optional[tuple[int, int]] = None,
         popup_anchor: Optional[tuple[int, int]] = None,
@@ -1751,8 +1766,20 @@ class DivIcon(MacroElement):
     ):
         super().__init__()
         self._name = "DivIcon"
+
+        processed_html: Optional[JsCode] = None
+        if text is not None:
+            if is_html:
+                html_content = safe_html(str(text))
+            else:
+                html_content = safe_text(str(text))
+            processed_html = JsCode(_escape_js_string_for_html(html_content))
+        elif html is not None:
+            html_content = trusted_html(str(html))
+            processed_html = JsCode(_escape_js_string_for_html(html_content))
+
         self.options = remove_empty(
-            html=html,
+            html=processed_html,
             icon_size=icon_size,
             icon_anchor=icon_anchor,
             popup_anchor=popup_anchor,

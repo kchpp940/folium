@@ -8,6 +8,7 @@ from folium.utilities import JsCode, TypeJsonValue, camelize
 from folium.safe_serialize import (
     safe_text,
     safe_html,
+    trusted_html,
     safe_url,
     safe_css_value,
     safe_js_value,
@@ -61,6 +62,7 @@ class Environment(jinja2.Environment):
         self.filters["tojavascript"] = tojavascript
         self.filters["safe_text"] = safe_text
         self.filters["safe_html"] = safe_html
+        self.filters["trusted_html"] = trusted_html
         self.filters["safe_url"] = safe_url
         self.filters["safe_css_value"] = safe_css_value
         self.filters["safe_js_value"] = safe_js_value

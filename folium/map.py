@@ -22,7 +22,7 @@ from folium.utilities import (
     remove_empty,
     validate_location,
 )
-from folium.safe_serialize import safe_css_value, safe_html, safe_js_options
+from folium.safe_serialize import safe_css_value, safe_html, safe_js_options, safe_text
 
 
 class classproperty:
@@ -582,7 +582,18 @@ class Popup(MacroElement):
     Parameters
     ----------
     html: string or Element
-        Content of the Popup.
+        Content of the Popup. If `text` is None, this is used as the
+        content. If `is_html` is False (default), the content is treated
+        as plain text and HTML-escaped. If `is_html` is True, the content
+        is treated as HTML and sanitized with a tag/attribute whitelist.
+        If an Element is passed, it is treated as fully trusted HTML.
+    text: string or None, default None
+        Plain text content of the Popup. If provided, this takes precedence
+        over `html` and is always treated as plain text (HTML-escaped).
+    is_html: bool, default False
+        If True, the `html` parameter is treated as HTML content and
+        sanitized. If False (default), the `html` parameter is treated
+        as plain text and HTML-escaped.
     parse_html: bool, default False
         True if the popup is a template that needs to the rendered first.
     max_width: int for pixels or text for percentages, default '100%'
@@ -620,6 +631,8 @@ class Popup(MacroElement):
     def __init__(
         self,
         html: Union[str, Element, None] = None,
+        text: Optional[str] = None,
+        is_html: bool = False,
         parse_html: bool = False,
         max_width: Union[str, int] = "100%",
         show: bool = False,
@@ -641,10 +654,23 @@ class Popup(MacroElement):
 
         if isinstance(html, Element):
             self.html.add_child(html)
+        elif text is not None:
+            if script:
+                processed = safe_text(str(text))
+                processed = escape_backticks(processed)
+            else:
+                processed = str(text)
+            self.html.add_child(Html(processed, script=script))
         elif isinstance(html, str):
-            html = safe_html(html)
-            html = escape_backticks(html)
-            self.html.add_child(Html(html, script=script))
+            if script:
+                if is_html:
+                    processed = safe_html(html)
+                else:
+                    processed = safe_text(html)
+                processed = escape_backticks(processed)
+            else:
+                processed = html
+            self.html.add_child(Html(processed, script=script))
 
         self.show = show
         self.lazy = lazy
@@ -679,7 +705,15 @@ class Tooltip(MacroElement):
     ----------
     text: str
         String to display as a tooltip on the object. If the argument is of a
-        different type it will be converted to str.
+        different type it will be converted to str. Treated as plain text
+        (HTML-escaped) by default unless `is_html=True`.
+    html: str or None, default None
+        HTML content to display. If provided, this takes precedence over
+        `text` and is treated as HTML content (sanitized with whitelist).
+    is_html: bool, default False
+        If True, the `text` parameter is treated as HTML content and
+        sanitized. If False (default), the `text` parameter is treated
+        as plain text and HTML-escaped.
     style: str, default None.
         HTML inline style properties like font and colors. Will be applied to
         a div with the text in it.
@@ -695,7 +729,7 @@ class Tooltip(MacroElement):
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.bindTooltip(
                 `<div{% if this.style %} style="{{ this.style|safe_css_value }}"{% endif %}>
-                     {{ this.text|safe_text }}
+                     {% if this.is_html %}{{ this.content|safe_html }}{% else %}{{ this.content|safe_text }}{% endif %}
                  </div>`,
                 {{ this.options|safe_js_options }}
             );
@@ -704,7 +738,9 @@ class Tooltip(MacroElement):
 
     def __init__(
         self,
-        text: str,
+        text: Optional[str] = None,
+        html: Optional[str] = None,
+        is_html: bool = False,
         style: Optional[str] = None,
         sticky: bool = True,
         **kwargs: TypeJsonValue,
@@ -712,7 +748,15 @@ class Tooltip(MacroElement):
         super().__init__()
         self._name = "Tooltip"
 
-        self.text = str(text)
+        if html is not None:
+            self.content = str(html)
+            self.is_html = True
+        elif text is not None:
+            self.content = str(text)
+            self.is_html = is_html
+        else:
+            self.content = ""
+            self.is_html = False
 
         kwargs.update({"sticky": sticky})
         self.options = remove_empty(**kwargs)

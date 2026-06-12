@@ -91,14 +91,14 @@ class WebGLEarth(JSCSSMixin, MacroElement):
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = WE.map(
                 '{{ this.container_id }}',
-                {{ this.options | tojavascript }}
+                {{ this.options | safe_js_options }}
             );
 
             WE.tileLayer(
-                {{ this.tile_url | tojson }},
+                {{ this.tile_url | safe_url }},
                 {
                     attribution: '&copy; OpenStreetMap contributors',
-                    subdomains: {{ this.tile_subdomains | tojson }}
+                    subdomains: {{ this.tile_subdomains | safe_js_value }}
                 }
             ).addTo({{ this.get_name() }});
 
@@ -185,7 +185,7 @@ class WebGLEarthMarker(MacroElement):
                 [{{ this.location[0] }}, {{ this.location[1] }}]
             ).addTo({{ this._parent.get_name() }});
             {% if this.popup %}
-            {{ this.get_name() }}.bindPopup({{ this.popup | tojson }});
+            {{ this.get_name() }}.bindPopup({{ this.popup | safe_text | safe_js_value }});
             {% endif %}
         {% endmacro %}
     """)
@@ -234,8 +234,8 @@ class WebGLEarthTileLayer(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = WE.tileLayer(
-                {{ this.url | tojson }},
-                {{ this.options | tojavascript }}
+                {{ this.url | safe_url }},
+                {{ this.options | safe_js_options }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
     """)
@@ -296,7 +296,7 @@ class WebGLEarthRealtime(JSCSSMixin, MacroElement):
             (function() {
                 var earth = {{ this._parent.get_name() }};
                 function {{ this.get_name() }}_update() {
-                    fetch({{ this.source_url | tojson }})
+                    fetch({{ this.source_url | safe_url }})
                         .then(function(response) { return response.json(); })
                         .then(function(data) {
                             var callback = {{ this.on_update.js_code }};

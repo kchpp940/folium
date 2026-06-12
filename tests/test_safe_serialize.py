@@ -14,6 +14,7 @@ import pytest
 from folium.safe_serialize import (
     safe_text,
     safe_html,
+    trusted_html,
     safe_url,
     safe_css_value,
     safe_js_value,
@@ -228,6 +229,71 @@ class TestSafeHtml:
         # Should not crash even on malformed HTML
         result = safe_html("<div <p>broken</div>")
         assert isinstance(result, str)
+
+
+# =============================================================================
+# trusted_html — user-marked trusted HTML, minimal escaping
+# =============================================================================
+
+
+class TestTrustedHtml:
+    """Test trusted_html — for user-explicitly-marked HTML content.
+
+    Strategy: Only escape backticks to prevent breaking JS template strings.
+    All HTML tags, attributes, and even scripts are passed through verbatim.
+    This is for when users intentionally pass HTML and take responsibility
+    for its safety.
+    """
+
+    def test_plain_text_passthrough(self):
+        assert trusted_html("Hello World") == "Hello World"
+
+    def test_none_returns_empty(self):
+        assert trusted_html(None) == ""
+
+    def test_number_converted(self):
+        assert trusted_html(42) == "42"
+
+    def test_html_tags_preserved(self):
+        result = trusted_html("<p>Hello <b>world</b></p>")
+        assert "<p>" in result
+        assert "<b>" in result
+        assert "</b>" in result
+        assert "</p>" in result
+
+    def test_script_tags_preserved(self):
+        result = trusted_html("<script>alert(1)</script>")
+        assert "<script>alert(1)</script>" in result
+
+    def test_event_handlers_preserved(self):
+        result = trusted_html('<div onclick="alert(1)">click</div>')
+        assert 'onclick="alert(1)"' in result
+
+    def test_javascript_urls_preserved(self):
+        result = trusted_html('<a href="javascript:alert(1)">click</a>')
+        assert 'href="javascript:alert(1)"' in result
+
+    def test_backticks_escaped(self):
+        result = trusted_html("text with `backtick`")
+        # Raw backtick should be escaped, not present as-is
+        assert " `backtick`" not in result
+        # Should have escaped backticks
+        assert "\\`backtick\\`" in result
+
+    def test_multiple_backticks_escaped(self):
+        result = trusted_html("`a` `b` `c`")
+        assert result == "\\`a\\` \\`b\\` \\`c\\`"
+
+    def test_jscode_passthrough(self):
+        code = JsCode("console.log('hello')")
+        result = trusted_html(code)
+        assert result == "console.log('hello')"
+
+    def test_mixed_html_and_backticks(self):
+        result = trusted_html('<div id="test">`code`</div>')
+        assert '<div id="test">' in result
+        assert "\\`code\\`" in result
+        assert "</div>" in result
 
 
 # =============================================================================
@@ -724,13 +790,16 @@ class TestEndToEndSecurity:
         import folium
 
         m = folium.Map()
+        # Default Popup treats content as plain text (safe_text path)
         popup = folium.Popup('<script>alert("xss")</script>')
         folium.Marker([0, 0], popup=popup).add_to(m)
 
-        html = m._repr_html_()
+        html = m.get_root().render()
+        # Raw script tag should not appear
         assert "<script>alert" not in html
-        # The script tag should be removed by safe_html
-        assert 'alert("xss")' not in html
+        # Content should be HTML-escaped
+        assert "&lt;script&gt;" in html
+        assert "&quot;xss&quot;" in html
 
     def test_xss_in_tile_layer_url(self):
         import folium
@@ -795,6 +864,227 @@ class TestEndToEndSecurity:
         assert evil_color not in html
         assert "<script>alert(2)</script>" not in html
         assert "\\u003cscript\\u003e" in html
+
+
+# =============================================================================
+# Three-path HTML handling tests: safe_text / sanitized_html / trusted_html
+#
+# These verify that Popup, Tooltip, and DivIcon correctly distinguish between:
+# 1. safe_text (default) — plain text with full HTML escaping
+# 2. sanitized_html (is_html=True) — HTML with whitelist sanitization
+# 3. trusted_html (Element/html param) — user-explicit HTML, minimal escaping
+# =============================================================================
+
+
+class TestThreePathHtmlHandling:
+    """Test the three HTML handling paths for Popup, Tooltip, DivIcon."""
+
+    # --- Popup three-path tests ---
+
+    def test_popup_default_is_safe_text(self):
+        """Default Popup(html=...) should treat content as plain text."""
+        import folium
+
+        m = folium.Map()
+        popup = folium.Popup("<b>Bold</b> & <i>Italic</i>")
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # HTML tags should be escaped, not rendered
+        assert "<b>Bold</b>" not in html
+        assert "&lt;b&gt;Bold&lt;/b&gt;" in html
+        assert "&amp;" in html
+
+    def test_popup_text_param_is_always_safe_text(self):
+        """Popup(text=...) should always be plain text regardless of is_html."""
+        import folium
+
+        m = folium.Map()
+        popup = folium.Popup(text="<b>Bold</b>", is_html=True)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        assert "<b>Bold</b>" not in html
+        assert "&lt;b&gt;Bold&lt;/b&gt;" in html
+
+    def test_popup_is_html_true_is_sanitized(self):
+        """Popup(html=..., is_html=True) should apply whitelist sanitization."""
+        import folium
+
+        m = folium.Map()
+        safe_html_content = '<p>Hello <b>world</b> <a href="https://example.com">link</a></p>'
+        popup = folium.Popup(safe_html_content, is_html=True)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # Allowed tags should survive
+        assert "<p>Hello <b>world</b>" in html
+        assert 'href="https://example.com"' in html
+
+    def test_popup_is_html_true_blocks_dangerous_tags(self):
+        """Popup with is_html=True should block script/iframe tags."""
+        import folium
+
+        m = folium.Map()
+        dangerous_html = "<p>Safe</p><script>alert(1)</script><iframe src='evil.html'></iframe>"
+        popup = folium.Popup(dangerous_html, is_html=True)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # Check that the dangerous content is not in the popup content area
+        # (The page itself has <script> tags for Leaflet, so we need to be specific)
+        assert "<script>alert(1)</script>" not in html
+        assert "<iframe src='evil.html'>" not in html
+        assert 'alert(1)' not in html or 'srcdoc' in html  # escaped in srcdoc
+        # Safe content should remain
+        assert "<p>Safe</p>" in html
+
+    def test_popup_element_is_trusted_html(self):
+        """Popup with Element html should be trusted (no sanitization)."""
+        import folium
+        from branca.element import IFrame
+        import base64
+
+        m = folium.Map()
+        iframe_content = '<div onclick="alert(1)">Click me</div>'
+        iframe = IFrame(iframe_content, width=200, height=100)
+        popup = folium.Popup(iframe)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # Element content should pass through without sanitization
+        # IFrame content is base64 encoded in data: URL, so decode and check
+        # Verify that an iframe with data URL is present
+        assert 'data:text/html;charset=utf-8;base64,' in html
+        # Extract and decode the base64 content to verify it's unchanged
+        import re
+        match = re.search(r'data:text/html;charset=utf-8;base64,([^"]+)', html)
+        assert match is not None
+        decoded = base64.b64decode(match.group(1)).decode('utf-8')
+        assert iframe_content in decoded
+
+    # --- Tooltip three-path tests ---
+
+    def test_tooltip_default_is_safe_text(self):
+        """Default Tooltip(text=...) should treat content as plain text."""
+        import folium
+
+        m = folium.Map()
+        tooltip = folium.Tooltip("<b>Bold</b> & <i>Italic</i>")
+        folium.Marker([0, 0], tooltip=tooltip).add_to(m)
+
+        html = m.get_root().render()
+        assert "<b>Bold</b>" not in html
+        assert "&lt;b&gt;Bold&lt;/b&gt;" in html
+        assert "&amp;" in html
+
+    def test_tooltip_html_param_is_sanitized(self):
+        """Tooltip(html=...) should apply whitelist sanitization."""
+        import folium
+
+        m = folium.Map()
+        safe_html_content = '<p>Hello <b>world</b> <a href="https://example.com">link</a></p>'
+        tooltip = folium.Tooltip(html=safe_html_content)
+        folium.Marker([0, 0], tooltip=tooltip).add_to(m)
+
+        html = m.get_root().render()
+        assert "<p>Hello <b>world</b>" in html
+        assert 'href="https://example.com"' in html
+
+    def test_tooltip_html_param_blocks_dangerous(self):
+        """Tooltip with html=... should block dangerous content."""
+        import folium
+
+        m = folium.Map()
+        dangerous_html = '<span onmouseover="alert(1)">Hover me</span>'
+        tooltip = folium.Tooltip(html=dangerous_html)
+        folium.Marker([0, 0], tooltip=tooltip).add_to(m)
+
+        html = m.get_root().render()
+        assert "onmouseover" not in html
+        assert "alert(1)" not in html
+
+    def test_tooltip_is_html_true_with_text_param(self):
+        """Tooltip(text=..., is_html=True) should apply sanitization."""
+        import folium
+
+        m = folium.Map()
+        tooltip = folium.Tooltip(text="<b>Bold</b>", is_html=True)
+        folium.Marker([0, 0], tooltip=tooltip).add_to(m)
+
+        html = m.get_root().render()
+        assert "<b>Bold</b>" in html
+
+    # --- DivIcon three-path tests ---
+
+    def test_divicon_default_html_is_trusted(self):
+        """DivIcon(html=...) is user-explicit HTML, should be trusted."""
+        import folium
+        from folium.features import DivIcon
+
+        m = folium.Map()
+        icon = DivIcon(
+            html='<div onclick="alert(1)" style="color: red;">Click</div>',
+            icon_size=(100, 30),
+        )
+        folium.Marker([0, 0], icon=icon).add_to(m)
+
+        html = m.get_root().render()
+        # User-provided HTML should pass through as trusted
+        # In JSON, quotes are escaped as \", which in Python repr shows as \\"
+        assert 'onclick=\\"alert(1)\\"' in html
+        assert 'style=\\"color: red;\\"' in html
+
+    def test_divicon_text_param_default_is_safe_text(self):
+        """DivIcon(text=...) default should be plain text."""
+        import folium
+        from folium.features import DivIcon
+
+        m = folium.Map()
+        icon = DivIcon(text="<b>Bold</b> & Text", icon_size=(100, 30))
+        folium.Marker([0, 0], icon=icon).add_to(m)
+
+        html = m.get_root().render()
+        assert "<b>Bold</b>" not in html
+        assert "&lt;b&gt;Bold&lt;/b&gt;" in html
+        assert "&amp; Text" in html
+
+    def test_divicon_text_param_is_html_true(self):
+        """DivIcon(text=..., is_html=True) should apply sanitization."""
+        import folium
+        from folium.features import DivIcon
+
+        m = folium.Map()
+        icon = DivIcon(
+            text='<p>Safe <b>HTML</b> <script>alert(1)</script></p>',
+            is_html=True,
+            icon_size=(100, 30),
+        )
+        folium.Marker([0, 0], icon=icon).add_to(m)
+
+        html = m.get_root().render()
+        # Allowed tags survive (check for JSON-escaped version)
+        assert '<p>Safe <b>HTML</b>' in html or '\\u003cp\\u003eSafe \\u003cb\\u003eHTML\\u003c/b\\u003e' in html
+        # Dangerous tags should be removed by safe_html - check for the specific string
+        assert '<script>alert(1)</script>' not in html
+        # The script content should be removed entirely by safe_html
+        assert 'alert(1)' not in html
+
+    def test_divicon_html_backticks_escaped(self):
+        """DivIcon(html=...) should have backticks escaped for JS safety."""
+        import folium
+        from folium.features import DivIcon
+
+        m = folium.Map()
+        icon = DivIcon(html="<div>`code`</div>", icon_size=(100, 30))
+        folium.Marker([0, 0], icon=icon).add_to(m)
+
+        html = m.get_root().render()
+        # Backticks should be escaped to prevent breaking JS template strings
+        # After trusted_html: ` -> \`, then JSON serialization doesn't touch \`
+        # In Python repr, \` shows as \\`
+        assert "`code`" not in html
+        assert "\\\\`code\\\\`" in html
 
 
 # =============================================================================
@@ -1007,3 +1297,129 @@ class TestOutputSnapshots:
         html = m.get_root().render()
         assert "Hello Tooltip" in html
         assert "color: red" in html or "color:red" in html
+
+    # --- trusted_html snapshots ---
+
+    def test_snapshot_trusted_html_preserves_everything(self):
+        """trusted_html should preserve all HTML, only escape backticks."""
+        html = '<div onclick="alert(1)" style="color: red;">Text `with` ticks</div>'
+        result = trusted_html(html)
+        # All HTML preserved
+        assert '<div onclick="alert(1)" style="color: red;">' in result
+        # Backticks escaped
+        assert "`with`" not in result
+        assert "\\`with\\`" in result
+
+    def test_snapshot_trusted_html_backtick_only(self):
+        assert trusted_html("`") == "\\`"
+
+    def test_snapshot_trusted_html_no_backticks(self):
+        assert trusted_html("<p>no backticks</p>") == "<p>no backticks</p>"
+
+    # --- Three-path compatibility snapshots ---
+    # These verify that existing Folium HTML patterns remain compatible
+
+    def test_snapshot_popup_with_safe_html_compatible(self):
+        """Popup(is_html=True) should be compatible with common Folium patterns."""
+        import folium
+
+        m = folium.Map()
+        # This is a common pattern - popup with links and formatting
+        popup_html = """
+            <div class="popup-content">
+                <h4>Location Details</h4>
+                <p><b>Name:</b> Example Place</p>
+                <p><a href="https://example.com" target="_blank">Visit website</a></p>
+                <img src="https://example.com/photo.jpg" alt="Photo" width="200">
+            </div>
+        """
+        popup = folium.Popup(popup_html, is_html=True)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # All allowed tags and attributes should be preserved
+        assert '<h4>Location Details</h4>' in html
+        assert '<p><b>Name:</b> Example Place</p>' in html
+        assert 'href="https://example.com"' in html
+        assert 'target="_blank"' in html
+        assert 'src="https://example.com/photo.jpg"' in html
+        assert 'width="200"' in html
+        assert 'class="popup-content"' in html
+
+    def test_snapshot_tooltip_with_html_compatible(self):
+        """Tooltip(html=...) should preserve safe formatting."""
+        import folium
+
+        m = folium.Map()
+        tooltip_html = '<div><b>Bold</b> <i>Italic</i> <small>Small</small></div>'
+        tooltip = folium.Tooltip(html=tooltip_html)
+        folium.Marker([0, 0], tooltip=tooltip).add_to(m)
+
+        html = m.get_root().render()
+        assert "<b>Bold</b>" in html
+        assert "<i>Italic</i>" in html
+        assert "<small>Small</small>" in html
+
+    def test_snapshot_popup_table_compatible(self):
+        """Popup with table structure should be fully compatible."""
+        import folium
+
+        m = folium.Map()
+        table_html = """
+            <table cellpadding="5" cellspacing="0">
+                <tr><th colspan="2">Data</th></tr>
+                <tr><td>Key 1</td><td>Value 1</td></tr>
+                <tr><td>Key 2</td><td>Value 2</td></tr>
+            </table>
+        """
+        popup = folium.Popup(table_html, is_html=True)
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        assert "<table" in html
+        assert 'cellpadding="5"' in html
+        assert 'cellspacing="0"' in html
+        assert "<th colspan=\"2\">Data</th>" in html
+        assert "<td>Key 1</td>" in html
+
+    def test_snapshot_divicon_custom_html_preserved(self):
+        """DivIcon custom HTML should be fully preserved as trusted."""
+        import folium
+        from folium.features import DivIcon
+
+        m = folium.Map()
+        custom_html = """
+            <div class="custom-marker" id="marker-123"
+                 style="background: #3388ff; border-radius: 50%; width: 30px; height: 30px;">
+                <span style="color: white; font-weight: bold;">1</span>
+            </div>
+        """
+        icon = DivIcon(html=custom_html, icon_size=(30, 30))
+        folium.Marker([0, 0], icon=icon).add_to(m)
+
+        html = m.get_root().render()
+        # All custom HTML should be preserved (trusted path)
+        # In JSON, quotes are escaped as \", which in Python repr shows as \\"
+        assert 'class=\\"custom-marker\\"' in html
+        assert 'id=\\"marker-123\\"' in html
+        assert 'background: #3388ff' in html
+        assert 'border-radius: 50%' in html
+        assert 'color: white' in html
+        assert 'font-weight: bold' in html
+
+    def test_snapshot_popup_backward_compatible_text(self):
+        """Popup with plain text should work as before (backward compatible)."""
+        import folium
+
+        m = folium.Map()
+        # Old usage: just pass text, it should be escaped by default
+        popup = folium.Popup("Plain text with <angle> brackets & 'quotes'")
+        folium.Marker([0, 0], popup=popup).add_to(m)
+
+        html = m.get_root().render()
+        # Should be escaped
+        assert "&lt;angle&gt;" in html
+        assert "&amp;" in html
+        assert "&#39;quotes&#39;" in html
+        # Original unescaped should not appear
+        assert "<angle>" not in html

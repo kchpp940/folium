@@ -186,6 +186,19 @@ def _escape_js_string(text: str) -> str:
     )
 
 
+def _escape_js_string_for_html(text: str) -> str:
+    """Escape pre-processed HTML content as a JavaScript string literal.
+
+    For HTML content that has already been sanitized/escaped at the HTML level
+    (via safe_text, safe_html, or trusted_html), we only need to do JS string
+    escaping (quotes, backslashes, newlines) without additional XSS escapes
+    for <, >, &, '. The HTML-level processing has already handled security.
+
+    The result is a properly quoted JSON string (including the quotes).
+    """
+    return json.dumps(text)
+
+
 def _to_escaped_json(obj: Any) -> str:
     """JSON serialization with XSS-prevention escapes applied."""
     return (
@@ -475,6 +488,35 @@ def safe_html(value: Union[str, Any]) -> str:
     if "<" not in text:
         return text  # No tags, nothing to sanitize
     return _sanitize_html(text)
+
+
+def trusted_html(value: Union[str, Any]) -> str:
+    """Serialize a value as trusted HTML content with NO sanitization.
+
+    **Strategy**: Pass-through with minimal escaping for JS template strings.
+
+    Only escapes backticks (`) to prevent breaking JavaScript template
+    string literals. All HTML tags, attributes, and scripts are passed
+    through verbatim.
+
+    **WARNING**: This is for user-provided HTML that is explicitly marked
+    as trusted. Use with extreme caution. For most use cases, prefer
+    `safe_html` (sanitized) or `safe_text` (escaped).
+
+    Use this when:
+    - The user explicitly passed `html=True` to indicate the content
+      contains intentional HTML
+    - The content comes from a trusted source and needs full HTML support
+
+    Example:
+        {{ popup_content | trusted_html }}
+    """
+    if value is None:
+        return ""
+    if isinstance(value, JsCode):
+        return value.js_code
+    text = str(value)
+    return text.replace("`", "\\`")
 
 
 def safe_url(value: Any) -> str:
