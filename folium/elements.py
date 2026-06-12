@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Optional
 from branca.element import (
     CssLink,
     Element,
-    Figure,
+    Figure as _BrancaFigure,
     JavascriptLink,
     MacroElement,
 )
@@ -32,7 +32,7 @@ def leaflet_method(fn):
 
 
 def get_or_create_resource_context(
-    figure: Figure,
+    figure: _BrancaFigure,
     strategy: ResourceStrategy = ResourceStrategy.CDN,
 ) -> ResourceContext:
     """从 Figure 获取或创建 ResourceContext。
@@ -128,7 +128,7 @@ class ResolvedCssLink(CssLink):
 
 
 def inject_resolved_resource(
-    figure: Figure,
+    figure: _BrancaFigure,
     resource: ResolvedResource,
 ) -> None:
     """将已解析的资源注入到 Figure 的 header 中。
@@ -173,7 +173,7 @@ def inject_resolved_resource(
     figure.header.add_child(element, name=resource.name)
 
 
-def inject_all_resolved_resources(figure: Figure) -> None:
+def inject_all_resolved_resources(figure: _BrancaFigure) -> None:
     """解析并注入 Figure 的 ResourceContext 中的所有资源。
 
     这是渲染前的最后一步，确保所有资源都已解析并注入。
@@ -187,7 +187,7 @@ def inject_all_resolved_resources(figure: Figure) -> None:
         inject_resolved_resource(figure, resource)
 
 
-def harvest_legacy_links(figure: Figure) -> None:
+def harvest_legacy_links(figure: _BrancaFigure) -> None:
     """扫描 Figure.header 中的旧式 JavascriptLink/CssLink，
     转换为 ResourceEntry 并移除旧元素。
 
@@ -251,7 +251,7 @@ def harvest_legacy_links(figure: Figure) -> None:
             inject_resolved_resource(figure, resource)
 
 
-class ResourceInjectingFigure(Figure):
+class ResourceInjectingFigure(_BrancaFigure):
     """扩展 branca.Figure，统一走 resolve → inject 资源管线。
 
     所有策略（CDN/INLINE/LOCAL/MIRROR）均经过同一条数据流：
@@ -383,7 +383,7 @@ class JSCSSMixin(MacroElement):
         """
         figure = self.get_root()
         assert isinstance(
-            figure, Figure
+            figure, _BrancaFigure
         ), "You cannot render this Element if it is not in a Figure."
 
         ctx = get_or_create_resource_context(figure)

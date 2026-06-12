@@ -4,7 +4,6 @@ from branca.element import (
     CssLink,
     Div,
     Element,
-    Figure,
     Html,
     IFrame,
     JavascriptLink,
@@ -13,6 +12,7 @@ from branca.element import (
 )
 
 from folium.elements import (
+    Figure,
     InlineScript,
     InlineStyle,
     ResourceInjectingFigure,
