@@ -56,9 +56,25 @@ import pytest
 # ``tests/snapshots/test_snapshots.py`` and must not be collected on their
 # own (they do top-level data fetching / geopandas imports that we only
 # want to pay for inside the render tier).
+#
+# We use ``pytest_ignore_collect`` instead of the plain ``collect_ignore``
+# list because the latter does not reliably match nested sub-packages in
+# all pytest versions.
 collect_ignore = [
-    str(Path(__file__).parent / "snapshots" / "modules"),
+    "tests/snapshots/modules",
 ]
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Skip ``tests/snapshots/modules/`` entirely during collection."""
+    # collection_path is a py.path.local; convert to a Path for comparison.
+    rel = Path(str(collection_path)).resolve().relative_to(
+        Path(__file__).parent.resolve()
+    )
+    parts = rel.parts
+    if len(parts) >= 2 and parts[0] == "snapshots" and parts[1] == "modules":
+        return True
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +316,150 @@ def pytest_report_header(config):
     if run_all:
         lines.append("  (--run-all: all gate tags enabled)")
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Collection-level marker audit – enforce the tiering contract
+# ---------------------------------------------------------------------------
+#
+# Rules applied to every collected test item:
+#
+# (A)  Category – every item must carry exactly ONE of {core, plugins},
+#      unless it lives in a special directory that has its own contract.
+#      Special directories:
+#        • tests/selenium/  → every item MUST carry `selenium`
+#        • tests/snapshots/ → every item MUST carry `render` + `selenium`
+#      These two directories are allowed to omit the category markers
+#      because their role is unambiguous from the path.
+#
+# (B)  Gate overlay – the markers {external_data, render, selenium} are
+#      *opt-in gates only*.  They may never appear on a regular item
+#      without a category marker.  On special directories, `render` and
+#      `selenium` serve a dual purpose (category + gate), but
+#      `external_data` remains an overlay everywhere.
+#
+# Any violation triggers a hard `pytest.exit` so that a new test file
+# introduced without markers fails collection immediately – nobody can
+# accidentally ship an unmarked test.
+# ---------------------------------------------------------------------------
+
+CATEGORY_MARKERS = {"core", "plugins"}
+GATE_MARKERS = {"external_data", "render", "selenium"}
+ALL_TIER_MARKERS = CATEGORY_MARKERS | GATE_MARKERS
+
+
+def pytest_collection_modifyitems(config, items):
+    root = Path(__file__).parent.resolve()  # tests/
+
+    errors: list[str] = []
+    stats = {m: 0 for m in ALL_TIER_MARKERS}
+    stats["no_category"] = 0
+    stats["gate_only"] = 0
+
+    for item in items:
+        path = Path(str(item.fspath)).resolve()
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue  # not under tests/ – skip
+
+        parts = rel.parts
+        in_selenium_dir = len(parts) >= 2 and parts[0] == "selenium"
+        in_snapshots_dir = len(parts) >= 2 and parts[0] == "snapshots"
+
+        node_markers = {mark.name for mark in item.iter_markers()} & ALL_TIER_MARKERS
+        categories_found = node_markers & CATEGORY_MARKERS
+        gates_found = node_markers & GATE_MARKERS
+
+        # Count for the summary line printed at the bottom.
+        for m in node_markers:
+            stats[m] += 1
+
+        if in_selenium_dir:
+            if "selenium" not in node_markers:
+                errors.append(
+                    f"[selenium-dir, missing 'selenium'] {item.nodeid}"
+                )
+            # external_data is allowed as an overlay; render on heat_map_selenium too.
+            continue
+
+        if in_snapshots_dir:
+            missing = {"render", "selenium"} - node_markers
+            if missing:
+                errors.append(
+                    f"[snapshots-dir, missing {sorted(missing)}] {item.nodeid}"
+                )
+            continue
+
+        # Regular tests – everything under tests/ except selenium/ and
+        # snapshots/.
+        if not categories_found:
+            stats["no_category"] += 1
+            errors.append(
+                f"[missing category – must be @pytest.mark.core OR "
+                f"@pytest.mark.plugins] {item.nodeid}"
+            )
+            if gates_found and not categories_found:
+                stats["gate_only"] += 1
+                errors.append(
+                    f"[gate marker(s) {sorted(gates_found)} used without "
+                    f"a category marker – add @pytest.mark.core or "
+                    f"@pytest.mark.plugins] {item.nodeid}"
+                )
+        elif len(categories_found) > 1:
+            errors.append(
+                f"[multiple categories {sorted(categories_found)} – pick "
+                f"exactly one of core|plugins] {item.nodeid}"
+            )
+
+    # Always print a marker audit summary so the numbers are visible in
+    # every CI log, even when nothing is broken.
+    summary = [
+        "",
+        "folium marker audit summary:",
+        f"  @pytest.mark.core          : {stats['core']:>4} items",
+        f"  @pytest.mark.plugins       : {stats['plugins']:>4} items",
+        f"  @pytest.mark.external_data : {stats['external_data']:>4} items (gate overlay)",
+        f"  @pytest.mark.render        : {stats['render']:>4} items (gate overlay)",
+        f"  @pytest.mark.selenium      : {stats['selenium']:>4} items (gate overlay)",
+        f"  items missing a category   : {stats['no_category']:>4}",
+        f"  items with only gate marks : {stats['gate_only']:>4}",
+    ]
+    config._folium_audit_lines = summary
+
+    if errors:
+        msg = "\n".join(
+            [
+                "",
+                "=" * 78,
+                "FOLIUM MARKER AUDIT FAILED",
+                "=" * 78,
+                "Every regular test under tests/ (excluding tests/selenium and",
+                "tests/snapshots) must carry EXACTLY ONE of @pytest.mark.core or",
+                "@pytest.mark.plugins.  Gate markers (external_data / render /",
+                "selenium) may only be used as overlays on top of a category.",
+                "",
+                "Violations:",
+            ]
+            + [f"  • {e}" for e in errors]
+            + [
+                "",
+                "If you are adding a new test file, add `pytestmark = pytest.mark.core`",
+                "or `pytestmark = pytest.mark.plugins` near the top of the file, then",
+                "use @pytest.mark.external_data / @pytest.mark.render /",
+                "@pytest.mark.selenium on individual test functions where needed.",
+                "=" * 78,
+            ]
+        )
+        pytest.exit(msg, returncode=4)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    lines = getattr(config, "_folium_audit_lines", None)
+    if not lines:
+        return
+    tw = terminalreporter._tw
+    tw.sep("-", "folium marker audit")
+    for line in lines:
+        tw.line(line)
+    tw.sep("-")
