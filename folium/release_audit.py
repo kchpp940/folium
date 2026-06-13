@@ -531,39 +531,361 @@ def check_vegalite_variants(result: AuditResult, policy: dict[str, Any]):
             )
 
 
-def generate_manifest(all_resources: dict[str, ClassResources], pretty: bool = False) -> str:
-    manifest: dict[str, Any] = {
-        "_generated": "Generated from folium.release_audit --generate-manifest. Source of truth is default_js/default_css in source code.",
-        "_generated_at": "",
-        "map_defaults": {"js": [], "css": []},
-        "features": {},
-        "plugins": {},
-    }
+MANIFEST_SCHEMA_VERSION = "1.0.0"
 
+MANIFEST_JSON_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://python-visualization.github.io/folium/schemas/resource-manifest-v1.json",
+    "title": "Folium CDN Resource Manifest",
+    "type": "object",
+    "version": MANIFEST_SCHEMA_VERSION,
+    "required": ["manifest_schema_version", "source_of_truth", "generated_at",
+                 "resources"],
+    "properties": {
+        "manifest_schema_version": {
+            "type": "string",
+            "description": "Semantic version of this manifest schema. Consumers should validate compatible major version."
+        },
+        "source_of_truth": {
+            "type": "string",
+            "const": "default_js/default_css in Python source",
+            "description": "Where the manifest was generated from — always the source code default_js/default_css declarations."
+        },
+        "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC timestamp when manifest was generated (ISO 8601)."
+        },
+        "folium_version": {
+            "type": "string",
+            "description": "Folium package version that produced this manifest."
+        },
+        "resource_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of unique (name, url) pairs in resources array."
+        },
+        "resources": {
+            "type": "array",
+            "description": "Flat list of all CDN resources, de-duplicated by URL.",
+            "items": {
+                "$ref": "#/$defs/ResourceEntry"
+            }
+        },
+        "by_class": {
+            "type": "object",
+            "description": "Resources grouped by the class that declares/uses them.",
+            "additionalProperties": {
+                "$ref": "#/$defs/ClassResources"
+            }
+        }
+    },
+    "$defs": {
+        "ResourceEntry": {
+            "type": "object",
+            "required": ["id", "name", "resource_type", "url",
+                         "source_class", "module"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Stable identifier: sha256(url)[:12]. Use as cache key."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Logical resource name as declared in default_js/default_css."
+                },
+                "resource_type": {
+                    "type": "string",
+                    "enum": ["js", "css"],
+                    "description": "Resource type: js or css."
+                },
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Full CDN URL."
+                },
+                "source_class": {
+                    "type": "string",
+                    "description": "Name of the class that uses this resource."
+                },
+                "module": {
+                    "type": "string",
+                    "description": "Fully-qualified Python module where the class lives."
+                },
+                "package": {
+                    "type": ["string", "null"],
+                    "description": "Extracted package/library name from URL (e.g. leaflet, jquery)."
+                },
+                "version": {
+                    "type": ["string", "null"],
+                    "description": "Extracted semantic version from URL if present."
+                },
+                "cdn_host": {
+                    "type": ["string", "null"],
+                    "description": "CDN provider host (jsdelivr, cdnjs, unpkg, ...)."
+                },
+                "inherited": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "True if resource is inherited from a parent class rather than declared directly."
+                },
+                "inherited_from": {
+                    "type": ["string", "null"],
+                    "description": "Name of parent class from which resource is inherited."
+                }
+            }
+        },
+        "ClassResources": {
+            "type": "object",
+            "required": ["module", "js", "css"],
+            "properties": {
+                "module": {"type": "string"},
+                "js": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Resource ids (sha256[:12]) of JS resources for this class."
+                },
+                "css": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Resource ids (sha256[:12]) of CSS resources for this class."
+                },
+                "inherited_resources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Resource ids that are inherited from parent classes."
+                },
+                "note": {
+                    "type": "string",
+                    "description": "Optional explanatory note from audit policy."
+                }
+            }
+        }
+    }
+}
+
+
+def _resource_id(url: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+
+
+def _cdn_host(url: str) -> str | None:
+    from urllib.parse import urlparse
+
+    host = urlparse(url).netloc
+    if "jsdelivr" in host:
+        return "jsdelivr"
+    if "cdnjs" in host:
+        return "cdnjs"
+    if "unpkg" in host:
+        return "unpkg"
+    if "jquery" in host:
+        return "jquery"
+    if "d3js" in host:
+        return "d3js"
+    if "bootstrapcdn" in host:
+        return "bootstrapcdn"
+    if "webglearth" in host:
+        return "webglearth"
+    if "github.io" in host:
+        return "github_pages"
+    if host:
+        return host
+    return None
+
+
+def build_stable_manifest(all_resources: dict[str, ClassResources]) -> dict[str, Any]:
     import datetime
 
-    manifest["_generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    resources_flat: dict[str, dict[str, Any]] = {}
+    by_class: dict[str, dict[str, Any]] = {}
 
-    for class_name, cr in all_resources.items():
-        js_list = [{"name": r.name, "url": r.url} for r in cr.js]
-        css_list = [{"name": r.name, "url": r.url} for r in cr.css]
-        entry = {"js": js_list, "css": css_list}
-        if cr.inherited_from:
-            entry["inherited_from"] = cr.inherited_from
-        if not cr.declared_on_class:
-            entry["inherited"] = True
-        entry["module"] = cr.module
+    for class_name, cr in sorted(all_resources.items()):
+        class_entry: dict[str, Any] = {
+            "module": cr.module,
+            "js": [],
+            "css": [],
+            "inherited_resources": [],
+        }
 
-        if class_name == "Map":
-            manifest["map_defaults"]["js"] = js_list
-            manifest["map_defaults"]["css"] = css_list
-            manifest["map_defaults"]["module"] = cr.module
-        elif cr.module.startswith("folium.features"):
-            manifest["features"][class_name] = entry
-        elif cr.module.startswith("folium.plugins"):
-            manifest["plugins"][class_name] = entry
+        for rtype, resource_list in [("js", cr.js), ("css", cr.css)]:
+            for r in resource_list:
+                rid = _resource_id(r.url)
+                if rid not in resources_flat:
+                    resources_flat[rid] = {
+                        "id": rid,
+                        "name": r.name,
+                        "resource_type": rtype,
+                        "url": r.url,
+                        "source_class": class_name,
+                        "module": cr.module,
+                        "package": _extract_package_from_url(r.url),
+                        "version": _extract_version_from_url(r.url),
+                        "cdn_host": _cdn_host(r.url),
+                        "inherited": not cr.declared_on_class,
+                        "inherited_from": cr.inherited_from,
+                    }
+                class_entry[rtype].append(rid)
+                if not cr.declared_on_class:
+                    class_entry["inherited_resources"].append(rid)
 
+        by_class[class_name] = class_entry
+
+    resources_list = sorted(resources_flat.values(), key=lambda x: x["id"])
+
+    try:
+        from folium._version import __version__ as folium_ver
+    except ImportError:
+        folium_ver = "unknown"
+
+    manifest: dict[str, Any] = {
+        "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
+        "source_of_truth": "default_js/default_css in Python source",
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "folium_version": folium_ver,
+        "resource_count": len(resources_list),
+        "resources": resources_list,
+        "by_class": by_class,
+    }
+    return manifest
+
+
+def manifest_json_schema() -> dict[str, Any]:
+    return dict(MANIFEST_JSON_SCHEMA)
+
+
+def validate_manifest(manifest: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for field in ["manifest_schema_version", "source_of_truth", "generated_at",
+                  "resource_count", "resources", "by_class"]:
+        if field not in manifest:
+            errors.append(f"Missing required top-level field: {field}")
+
+    if manifest.get("manifest_schema_version", "").split(".")[0] != MANIFEST_SCHEMA_VERSION.split(".")[0]:
+        errors.append(
+            f"Major schema version mismatch: manifest={manifest.get('manifest_schema_version')}, "
+            f"expected={MANIFEST_SCHEMA_VERSION}"
+        )
+
+    if manifest.get("source_of_truth") != "default_js/default_css in Python source":
+        errors.append("source_of_truth is not the expected value")
+
+    if not isinstance(manifest.get("resources"), list):
+        errors.append("'resources' must be an array")
+    else:
+        for idx, res in enumerate(manifest.get("resources", [])):
+            for required in ["id", "name", "resource_type", "url", "source_class", "module"]:
+                if required not in res:
+                    errors.append(f"resources[{idx}] missing required field: {required}")
+            if res.get("resource_type") not in ("js", "css"):
+                errors.append(f"resources[{idx}].resource_type must be 'js' or 'css'")
+
+    actual_count = len(manifest.get("resources", []))
+    declared_count = manifest.get("resource_count")
+    if declared_count is not None and declared_count != actual_count:
+        errors.append(
+            f"resource_count ({declared_count}) does not match actual resources array length ({actual_count})"
+        )
+
+    return errors
+
+
+def generate_manifest(all_resources: dict[str, ClassResources], pretty: bool = False) -> str:
+    manifest = build_stable_manifest(all_resources)
     return json.dumps(manifest, indent=2 if pretty else None, sort_keys=True)
+
+
+def download_resources(manifest: dict[str, Any], output_dir: Path,
+                       timeout: float = 30.0) -> dict[str, Any]:
+    import hashlib
+    from urllib.parse import urlparse
+    from urllib.request import urlopen
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_dir = output_dir / "cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    index_path = output_dir / "index.json"
+    download_report: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for res in manifest.get("resources", []):
+        rid = res["id"]
+        url = res["url"]
+        rtype = res["resource_type"]
+        name = res["name"]
+
+        parsed = urlparse(url)
+        path_part = parsed.path.lstrip("/")
+        safe_filename = path_part.replace("/", "_").replace("@", "_at_")
+        file_path = cache_dir / f"{rid}_{safe_filename}"
+
+        entry = {
+            "id": rid,
+            "name": name,
+            "resource_type": rtype,
+            "url": url,
+            "local_path": str(file_path.relative_to(output_dir)),
+            "source_class": res.get("source_class"),
+            "package": res.get("package"),
+            "version": res.get("version"),
+            "cdn_host": res.get("cdn_host"),
+        }
+
+        if file_path.exists() and file_path.stat().st_size > 0:
+            entry["status"] = "cached"
+            download_report.append(entry)
+            continue
+
+        try:
+            with urlopen(url, timeout=timeout) as resp:
+                content = resp.read()
+                actual_sha = hashlib.sha256(content).hexdigest()[:12]
+                if actual_sha != rid:
+                    entry["status"] = "hash_mismatch_warning"
+                    entry["hash_expected"] = rid
+                    entry["hash_actual"] = actual_sha
+                else:
+                    entry["status"] = "downloaded"
+                entry["size_bytes"] = len(content)
+                file_path.write_bytes(content)
+            download_report.append(entry)
+        except Exception as exc:
+            errors.append({
+                "id": rid,
+                "url": url,
+                "error": str(exc),
+            })
+            entry["status"] = "failed"
+            entry["error"] = str(exc)
+            download_report.append(entry)
+
+    summary = {
+        "manifest_schema_version": manifest.get("manifest_schema_version"),
+        "folium_version": manifest.get("folium_version"),
+        "generated_at": manifest.get("generated_at"),
+        "total_resources": manifest.get("resource_count"),
+        "cached": sum(1 for d in download_report if d.get("status") == "cached"),
+        "downloaded": sum(1 for d in download_report if d.get("status") == "downloaded"),
+        "failed": sum(1 for d in download_report if d.get("status") == "failed"),
+        "hash_mismatches": sum(1 for d in download_report if d.get("status") == "hash_mismatch_warning"),
+    }
+
+    index_data = {
+        "manifest_schema_version": manifest.get("manifest_schema_version"),
+        "generated_at": manifest.get("generated_at"),
+        "folium_version": manifest.get("folium_version"),
+        "summary": summary,
+        "resources": download_report,
+        "errors": errors,
+    }
+    index_path.write_text(json.dumps(index_data, indent=2, sort_keys=True), encoding="utf-8")
+
+    return index_data
 
 
 def collect_all_resources() -> dict[str, ClassResources]:
@@ -636,16 +958,100 @@ def format_findings(findings: list[AuditFinding], label: str) -> str:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Folium Release Resource Audit")
-    parser.add_argument("--json", action="store_true", help="Output results as JSON")
-    parser.add_argument("--strict", action="store_true", help="Promote warnings to errors per policy")
-    parser.add_argument("--generate-manifest", action="store_true", help="Generate JSON manifest from source code")
-    parser.add_argument("--pretty", action="store_true", help="Pretty-print generated manifest")
+    parser = argparse.ArgumentParser(
+        description="Folium Release Resource Audit & Offline Resource Tool"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    audit_p = subparsers.add_parser("audit", help="Run resource consistency audit (default)")
+    audit_p.add_argument("--json", action="store_true", help="Output results as JSON")
+    audit_p.add_argument("--strict", action="store_true", help="Promote warnings per policy")
+
+    manifest_p = subparsers.add_parser("manifest", help="Resource manifest generation/validation")
+    manifest_p.add_argument("--generate", action="store_true", help="Generate manifest from source")
+    manifest_p.add_argument("--validate", type=str, metavar="FILE",
+                            help="Validate a manifest file against schema")
+    manifest_p.add_argument("--print-schema", action="store_true", help="Print JSON Schema")
+    manifest_p.add_argument("--pretty", action="store_true", help="Pretty-print output")
+
+    offline_p = subparsers.add_parser("offline", help="Offline CDN resource download")
+    offline_p.add_argument("--dir", type=str, default=".folium_offline",
+                           help="Output directory for downloaded resources")
+    offline_p.add_argument("--manifest", type=str, metavar="FILE",
+                           help="Use existing manifest file (skip regeneration)")
+    offline_p.add_argument("--timeout", type=float, default=30.0,
+                           help="Per-file download timeout in seconds")
+
+    parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--generate-manifest", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--pretty", action="store_true", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
 
-    if args.generate_manifest:
+    if args.command is None:
+        if args.generate_manifest:
+            args.command = "manifest"
+        else:
+            args.command = "audit"
+
+    if args.command == "manifest":
+        if args.print_schema:
+            schema = manifest_json_schema()
+            print(json.dumps(schema, indent=2 if (args.pretty or getattr(args, "pretty", False)) else None, sort_keys=True))
+            sys.exit(0)
+
+        if args.validate:
+            manifest_file = Path(args.validate)
+            if not manifest_file.exists():
+                print(f"ERROR: manifest file not found: {manifest_file}", file=sys.stderr)
+                sys.exit(2)
+            manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            errors = validate_manifest(manifest_data)
+            if errors:
+                print(f"Manifest validation FAILED ({len(errors)} error(s)):")
+                for e in errors:
+                    print(f"  - {e}")
+                sys.exit(1)
+            print(f"Manifest valid. Schema version: {manifest_data.get('manifest_schema_version')}, "
+                  f"resources: {manifest_data.get('resource_count')}")
+            sys.exit(0)
+
         all_res = collect_all_resources()
-        print(generate_manifest(all_res, pretty=args.pretty))
+        print(generate_manifest(all_res, pretty=args.pretty or getattr(args, "pretty", False)))
+        sys.exit(0)
+
+    if args.command == "offline":
+        output_dir = Path(args.dir).resolve()
+        if args.manifest:
+            manifest_file = Path(args.manifest).resolve()
+            manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            errors = validate_manifest(manifest_data)
+            if errors:
+                print(f"ERROR: provided manifest fails validation:", file=sys.stderr)
+                for e in errors:
+                    print(f"  - {e}", file=sys.stderr)
+                sys.exit(2)
+        else:
+            all_res = collect_all_resources()
+            manifest_data = build_stable_manifest(all_res)
+
+        manifest_path = output_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest_data, indent=2, sort_keys=True), encoding="utf-8")
+
+        report = download_resources(manifest_data, output_dir, timeout=args.timeout)
+        summary = report["summary"]
+        print(f"\nOffline download complete. Output directory: {output_dir}")
+        print(f"  Total resources: {summary['total_resources']}")
+        print(f"  Cached:          {summary['cached']}")
+        print(f"  Downloaded:      {summary['downloaded']}")
+        print(f"  Failed:          {summary['failed']}")
+        print(f"  Hash mismatches: {summary['hash_mismatches']}")
+        print(f"\nManifest saved to: {manifest_path}")
+        print(f"Download index:    {output_dir / 'index.json'}")
+
+        if summary["failed"] > 0:
+            sys.exit(1)
         sys.exit(0)
 
     result = run_audit(strict=args.strict)

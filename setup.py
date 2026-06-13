@@ -31,6 +31,7 @@ package_data = {
         "templates/*.js",
         "templates/*.txt",
         "py.typed",
+        "release_audit_policy.json",
     ]
     + walk_subpkg("templates/tiles")
 }

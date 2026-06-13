@@ -28,16 +28,20 @@ from folium.release_audit import (
     AuditResult,
     ClassResources,
     FOLIUM_ROOT,
+    MANIFEST_SCHEMA_VERSION,
     ResourceEntry,
     _collect_resources_from_class,
+    _cdn_host,
     _extract_package_from_url,
     _extract_version_from_url,
     _get_feature_classes,
     _get_plugin_classes,
-    _is_no_resources_class,
-    _is_inheritance_class,
     _is_dynamic_resource_class,
+    _is_inheritance_class,
+    _is_no_resources_class,
     _is_strict_promotable,
+    _resource_id,
+    build_stable_manifest,
     check_duplicate_names,
     check_inheritance_consistency,
     check_policy_compliance,
@@ -45,7 +49,9 @@ from folium.release_audit import (
     collect_all_resources,
     generate_manifest,
     load_policy,
+    manifest_json_schema,
     run_audit,
+    validate_manifest,
 )
 
 pytestmark = pytest.mark.audit
@@ -495,45 +501,224 @@ class TestInheritanceConsistency:
         )
 
 
-class TestManifestGeneration:
-    def test_generate_manifest_returns_json(self):
-        all_res = collect_all_resources()
-        manifest_str = generate_manifest(all_res, pretty=False)
-        data = json.loads(manifest_str)
-        assert "_generated" in data
-        assert "_generated_at" in data
-        assert "map_defaults" in data
-        assert "features" in data
-        assert "plugins" in data
+class TestStableManifestSchema:
+    def test_manifest_schema_version_constant(self):
+        assert MANIFEST_SCHEMA_VERSION == "1.0.0"
+        parts = MANIFEST_SCHEMA_VERSION.split(".")
+        assert len(parts) == 3
+        assert all(p.isdigit() for p in parts)
 
-    def test_generate_manifest_includes_map_defaults(self):
-        all_res = collect_all_resources()
-        manifest_str = generate_manifest(all_res, pretty=False)
-        data = json.loads(manifest_str)
-        assert "js" in data["map_defaults"]
-        assert "css" in data["map_defaults"]
-        assert len(data["map_defaults"]["js"]) > 0
+    def test_resource_id_stable(self):
+        url1 = "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"
+        url2 = "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"
+        id1 = _resource_id(url1)
+        id2 = _resource_id(url2)
+        assert id1 == id2
+        assert len(id1) == 12
 
-    def test_generate_manifest_includes_plugins(self):
-        all_res = collect_all_resources()
-        manifest_str = generate_manifest(all_res, pretty=False)
-        data = json.loads(manifest_str)
-        assert len(data["plugins"]) > 30
-        assert "MarkerCluster" in data["plugins"]
-        assert "Draw" in data["plugins"]
+    def test_resource_id_different_urls(self):
+        id1 = _resource_id("https://a.com/x.js")
+        id2 = _resource_id("https://a.com/y.js")
+        assert id1 != id2
 
-    def test_generate_manifest_marks_inherited_resources(self):
+    def test_cdn_host_detection(self):
+        assert _cdn_host("https://cdn.jsdelivr.net/npm/foo@1/a.js") == "jsdelivr"
+        assert _cdn_host("https://cdnjs.cloudflare.com/ajax/libs/foo/1.0/a.js") == "cdnjs"
+        assert _cdn_host("https://unpkg.com/foo/a.js") == "unpkg"
+        assert _cdn_host("https://code.jquery.com/jquery-3.js") == "jquery"
+        assert _cdn_host("https://netdna.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css") == "bootstrapcdn"
+        assert _cdn_host("https://www.webglearth.com/v2/api.js") == "webglearth"
+
+    def test_build_stable_manifest_structure(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+
+        for field in ["manifest_schema_version", "source_of_truth", "generated_at",
+                      "folium_version", "resource_count", "resources", "by_class"]:
+            assert field in manifest, f"Missing top-level field: {field}"
+
+        assert manifest["manifest_schema_version"] == MANIFEST_SCHEMA_VERSION
+        assert manifest["source_of_truth"] == "default_js/default_css in Python source"
+        assert isinstance(manifest["resources"], list)
+        assert isinstance(manifest["by_class"], dict)
+        assert manifest["resource_count"] == len(manifest["resources"])
+
+    def test_manifest_resources_have_required_fields(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        required = ["id", "name", "resource_type", "url", "source_class", "module"]
+
+        for idx, res in enumerate(manifest["resources"]):
+            for field in required:
+                assert field in res, f"resources[{idx}] missing field: {field}"
+            assert res["resource_type"] in ("js", "css")
+            assert res["url"].startswith(("http://", "https://"))
+            assert len(res["id"]) == 12
+
+    def test_manifest_by_class_structure(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+
+        for class_name, class_data in manifest["by_class"].items():
+            assert "module" in class_data
+            assert "js" in class_data
+            assert "css" in class_data
+            assert isinstance(class_data["js"], list)
+            assert isinstance(class_data["css"], list)
+
+    def test_manifest_by_class_refs_are_valid(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        valid_ids = {r["id"] for r in manifest["resources"]}
+
+        for class_name, class_data in manifest["by_class"].items():
+            for rid in class_data["js"] + class_data["css"]:
+                assert rid in valid_ids, (
+                    f"Class {class_name} references unknown resource id {rid}"
+                )
+
+    def test_validate_manifest_valid(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        errors = validate_manifest(manifest)
+        assert errors == [], f"Valid manifest produced errors: {errors}"
+
+    def test_validate_manifest_missing_field(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        del manifest["resources"]
+        errors = validate_manifest(manifest)
+        assert len(errors) > 0
+        assert any("resources" in e for e in errors)
+
+    def test_validate_manifest_major_version_mismatch(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        manifest["manifest_schema_version"] = "999.0.0"
+        errors = validate_manifest(manifest)
+        assert len(errors) > 0
+        assert any("version" in e.lower() for e in errors)
+
+    def test_validate_manifest_bad_resource_count(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        manifest["resource_count"] = manifest["resource_count"] + 42
+        errors = validate_manifest(manifest)
+        assert len(errors) > 0
+        assert any("resource_count" in e for e in errors)
+
+    def test_validate_manifest_bad_resource_type(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        manifest["resources"][0]["resource_type"] = "exe"
+        errors = validate_manifest(manifest)
+        assert len(errors) > 0
+        assert any("resource_type" in e for e in errors)
+
+    def test_manifest_json_schema_valid(self):
+        schema = manifest_json_schema()
+        assert "$schema" in schema
+        assert "$defs" in schema
+        assert "ResourceEntry" in schema["$defs"]
+        assert "ClassResources" in schema["$defs"]
+        res_props = schema["$defs"]["ResourceEntry"]["properties"]
+        assert "id" in res_props
+        assert "url" in res_props
+        assert "resource_type" in res_props
+
+    def test_generate_manifest_is_valid_json(self):
         all_res = collect_all_resources()
         manifest_str = generate_manifest(all_res, pretty=False)
         data = json.loads(manifest_str)
-        assert data["plugins"]["FastMarkerCluster"].get("inherited") is True
-        assert data["plugins"]["FastMarkerCluster"].get("inherited_from") == "MarkerCluster"
+        assert data["manifest_schema_version"] == MANIFEST_SCHEMA_VERSION
+
+    def test_generate_manifest_includes_plugins_in_by_class(self):
+        all_res = collect_all_resources()
+        manifest_str = generate_manifest(all_res, pretty=False)
+        data = json.loads(manifest_str)
+        assert len(data["by_class"]) > 40
+        assert "MarkerCluster" in data["by_class"]
+        assert "Draw" in data["by_class"]
+        assert "FastMarkerCluster" in data["by_class"]
+
+    def test_generate_manifest_fastmarkercluster_inherited(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        fastmc = manifest["by_class"].get("FastMarkerCluster")
+        assert fastmc is not None
+        assert "inherited_resources" in fastmc
+        if fastmc["js"]:
+            for rid in fastmc["js"]:
+                if rid in fastmc["inherited_resources"]:
+                    res = next(r for r in manifest["resources"] if r["id"] == rid)
+                    assert res["inherited"] is True
+                    assert res["inherited_from"] == "MarkerCluster"
+                    break
 
     def test_generate_manifest_pretty_format(self):
         all_res = collect_all_resources()
         pretty_str = generate_manifest(all_res, pretty=True)
         assert "\n" in pretty_str
         assert "  " in pretty_str
+
+
+class TestOfflineDownload:
+    def test_download_function_importable(self):
+        from folium.release_audit import download_resources
+        assert callable(download_resources)
+
+    def test_manifest_generated_before_download(self):
+        all_res = collect_all_resources()
+        manifest = build_stable_manifest(all_res)
+        assert len(manifest["resources"]) > 0
+        for r in manifest["resources"]:
+            assert r["url"].startswith("http")
+
+    def test_offline_output_directory_structure(self, tmp_path):
+        from folium.release_audit import download_resources
+
+        mini_manifest = {
+            "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
+            "source_of_truth": "default_js/default_css in Python source",
+            "generated_at": "2026-01-01T00:00:00Z",
+            "folium_version": "test",
+            "resource_count": 0,
+            "resources": [],
+            "by_class": {},
+        }
+        report = download_resources(mini_manifest, tmp_path)
+
+        assert report["summary"]["total_resources"] == 0
+        assert (tmp_path / "index.json").exists()
+        assert (tmp_path / "cache").is_dir()
+
+        idx = json.loads((tmp_path / "index.json").read_text())
+        assert "summary" in idx
+        assert "resources" in idx
+        assert "errors" in idx
+
+
+class TestPolicyPackaging:
+    def test_policy_file_in_folium_package_root(self):
+        policy_path = FOLIUM_ROOT / "release_audit_policy.json"
+        assert policy_path.exists()
+        assert policy_path.is_file()
+
+    def test_policy_file_in_setup_package_data(self):
+        setup_path = FOLIUM_ROOT.parent / "setup.py"
+        content = setup_path.read_text(encoding="utf-8")
+        assert "release_audit_policy.json" in content
+
+    def test_policy_file_loads_from_installed_package(self):
+        policy = load_policy()
+        assert isinstance(policy, dict)
+        assert "classes" in policy
+        assert "strict" in policy
+
+    def test_load_policy_returns_valid_structure(self):
+        policy = load_policy()
+        for section in ["classes", "docs", "strict", "version_drift"]:
+            assert section in policy, f"Policy missing section: {section}"
 
 
 class TestFullAudit:
