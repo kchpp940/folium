@@ -4,7 +4,7 @@ Pytest configuration for folium tests.
 Defines test markers, CLI options, and auto-skip logic to separate:
 - core: fast, stable unit tests (run by default)
 - plugins: plugin tests (run by default)
-- audit: release resource consistency audit (requires --run-audit flag)
+- audit: release resource consistency audit (run by default)
 - external_data: tests requiring geodatasets or network resources
 - render: slow PNG rendering tests with pixelmatch
 - selenium: browser automation tests

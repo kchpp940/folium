@@ -31,6 +31,7 @@ from folium.features import (
 )
 from folium.folium import Map
 from folium.map import (
+    CustomPane,
     FeatureGroup,
     FitBounds,
     FitOverlays,
@@ -41,7 +42,7 @@ from folium.map import (
     Popup,
     Tooltip,
 )
-from folium.raster_layers import TileLayer, WmsTileLayer
+from folium.raster_layers import ImageOverlay, TileLayer, VideoOverlay, WmsTileLayer
 from folium.utilities import JsCode
 from folium.vector_layers import Circle, CircleMarker, Polygon, PolyLine, Rectangle
 
@@ -72,6 +73,7 @@ __all__ = [
     "Control",
     "CssLink",
     "CustomIcon",
+    "CustomPane",
     "Div",
     "DivIcon",
     "Element",
@@ -85,6 +87,7 @@ __all__ = [
     "Html",
     "IFrame",
     "Icon",
+    "ImageOverlay",
     "JavascriptLink",
     "JsCode",
     "LatLngPopup",
@@ -103,8 +106,8 @@ __all__ = [
     "TopoJson",
     "Vega",
     "VegaLite",
+    "VideoOverlay",
     "WmsTileLayer",
-    # vector_layers
     "Circle",
     "CircleMarker",
     "PolyLine",

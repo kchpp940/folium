@@ -45,12 +45,12 @@ control = Control(
 
 # Add the plugin's JS/CSS assets.
 control.add_js_link(
-    "Control.Fullscreen.js",
-    "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.min.js",
+    "leaflet-fullscreen",
+    "https://unpkg.com/leaflet-fullscreen@1.6.0/dist/leaflet.fullscreen.umd.js",
 )
 control.add_css_link(
-    "Control.FullScreen.css",
-    "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.css",
+    "leaflet-fullscreen",
+    "https://unpkg.com/leaflet.fullscreen@1.6.0/Control.FullScreen.css",
 )
 
 control.add_to(m)

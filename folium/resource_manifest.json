@@ -1,0 +1,415 @@
+{
+  "_comment": "Single source of truth for all CDN resources used by Folium. The release audit tool (folium/release_audit.py) validates that plugin classes, features, docs and offline lists stay consistent with this manifest.",
+
+  "map_defaults": {
+    "js": [
+      {"name": "leaflet", "url": "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"},
+      {"name": "jquery", "url": "https://code.jquery.com/jquery-3.7.1.min.js"},
+      {"name": "bootstrap", "url": "https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"},
+      {"name": "awesome_markers", "url": "https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"}
+    ],
+    "css": [
+      {"name": "leaflet_css", "url": "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"},
+      {"name": "bootstrap_css", "url": "https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"},
+      {"name": "glyphicons_css", "url": "https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"},
+      {"name": "awesome_markers_font_css", "url": "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"},
+      {"name": "awesome_markers_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"},
+      {"name": "awesome_rotate_css", "url": "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"}
+    ]
+  },
+
+  "features": {
+    "RegularPolygonMarker": {
+      "js": [
+        {"name": "dvf_js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/leaflet-dvf.markers.min.js"}
+      ],
+      "css": []
+    },
+    "Vega": {
+      "js": [
+        {"name": "d3", "url": "https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"},
+        {"name": "vega", "url": "https://cdnjs.cloudflare.com/ajax/libs/vega/1.4.3/vega.min.js"},
+        {"name": "jquery", "url": "https://code.jquery.com/jquery-3.7.1.min.js"}
+      ],
+      "css": []
+    },
+    "VegaLite": {
+      "js_dynamic": true,
+      "note": "VegaLite selects JS links at render time based on schema version. URLs are embedded in features.py methods.",
+      "variants": {
+        "v6": {
+          "js": [
+            {"name": "vega", "url": "https://cdn.jsdelivr.net/npm/vega@5"},
+            {"name": "vega-lite", "url": "https://cdn.jsdelivr.net/npm/vega-lite@6"},
+            {"name": "vega-embed", "url": "https://cdn.jsdelivr.net/npm/vega-embed@6"}
+          ]
+        },
+        "v5": {
+          "js": [
+            {"name": "vega", "url": "https://cdn.jsdelivr.net/npm//vega@5"},
+            {"name": "vega-lite", "url": "https://cdn.jsdelivr.net/npm/vega-lite@5"},
+            {"name": "vega-embed", "url": "https://cdn.jsdelivr.net/npm/vega-embed@6"}
+          ]
+        },
+        "v4": {
+          "js": [
+            {"name": "vega", "url": "https://cdn.jsdelivr.net/npm//vega@5"},
+            {"name": "vega-lite", "url": "https://cdn.jsdelivr.net/npm/vega-lite@4"},
+            {"name": "vega-embed", "url": "https://cdn.jsdelivr.net/npm/vega-embed@6"}
+          ]
+        },
+        "v3": {
+          "js": [
+            {"name": "vega", "url": "https://cdn.jsdelivr.net/npm/vega@4"},
+            {"name": "vega-lite", "url": "https://cdn.jsdelivr.net/npm/vega-lite@3"},
+            {"name": "vega-embed", "url": "https://cdn.jsdelivr.net/npm/vega-embed@3"}
+          ]
+        },
+        "v2": {
+          "js": [
+            {"name": "vega", "url": "https://cdn.jsdelivr.net/npm/vega@3"},
+            {"name": "vega-lite", "url": "https://cdn.jsdelivr.net/npm/vega-lite@2"},
+            {"name": "vega-embed", "url": "https://cdn.jsdelivr.net/npm/vega-embed@3"}
+          ]
+        },
+        "v1": {
+          "js": [
+            {"name": "d3", "url": "https://d3js.org/d3.v3.min.js"},
+            {"name": "vega", "url": "https://cdnjs.cloudflare.com/ajax/libs/vega/2.6.5/vega.js"},
+            {"name": "vega-lite", "url": "https://cdnjs.cloudflare.com/ajax/libs/vega-lite/1.3.1/vega-lite.js"},
+            {"name": "vega-embed", "url": "https://cdnjs.cloudflare.com/ajax/libs/vega-embed/2.2.0/vega-embed.js"}
+          ]
+        }
+      },
+      "css": []
+    },
+    "Choropleth": {
+      "js": [
+        {"name": "topojson", "url": "https://cdnjs.cloudflare.com/ajax/libs/topojson/1.6.9/topojson.min.js"}
+      ],
+      "css": []
+    }
+  },
+
+  "plugins": {
+    "AntPath": {
+      "source": "folium.plugins.antpath",
+      "js": [
+        {"name": "antpath", "url": "https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.1.2/dist/leaflet-ant-path.min.js"}
+      ],
+      "css": []
+    },
+    "BeautifyIcon": {
+      "source": "folium.plugins.beautify_icon",
+      "js": [
+        {"name": "beautify_icon_js", "url": "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.js"}
+      ],
+      "css": [
+        {"name": "beautify_icon_css", "url": "https://cdn.jsdelivr.net/gh/marslan390/BeautifyMarker/leaflet-beautify-marker-icon.min.css"}
+      ]
+    },
+    "BoatMarker": {
+      "source": "folium.plugins.boat_marker",
+      "js": [
+        {"name": "markerclusterjs", "url": "https://unpkg.com/leaflet.boatmarker/leaflet.boatmarker.min.js"}
+      ],
+      "css": []
+    },
+    "Draw": {
+      "source": "folium.plugins.draw",
+      "js": [
+        {"name": "leaflet_draw_js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.js"}
+      ],
+      "css": [
+        {"name": "leaflet_draw_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.css"}
+      ]
+    },
+    "DualMap": {
+      "source": "folium.plugins.dual_map",
+      "js": [
+        {"name": "Leaflet.Sync", "url": "https://cdn.jsdelivr.net/gh/jieter/Leaflet.Sync/L.Map.Sync.min.js"}
+      ],
+      "css": []
+    },
+    "Encoded": {
+      "source": "folium.plugins.encoded",
+      "js": [
+        {"name": "polyline_encoded", "url": "https://cdn.jsdelivr.net/npm/polyline-encoded@0.0.9/Polyline.encoded.js"}
+      ],
+      "css": []
+    },
+    "FeatureGroupSubGroup": {
+      "source": "folium.plugins.feature_group_sub_group",
+      "js": [
+        {"name": "featuregroupsubgroupjs", "url": "https://unpkg.com/leaflet.featuregroup.subgroup@1.0.2/dist/leaflet.featuregroup.subgroup.js"}
+      ],
+      "css": []
+    },
+    "Fullscreen": {
+      "source": "folium.plugins.fullscreen",
+      "js": [
+        {"name": "Control.Fullscreen.js", "url": "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.min.js"}
+      ],
+      "css": [
+        {"name": "Control.FullScreen.css", "url": "https://cdn.jsdelivr.net/npm/leaflet.fullscreen@3.0.0/Control.FullScreen.css"}
+      ]
+    },
+    "Geocoder": {
+      "source": "folium.plugins.geocoder",
+      "js": [
+        {"name": "Control.Geocoder.js", "url": "https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"}
+      ],
+      "css": [
+        {"name": "Control.Geocoder.css", "url": "https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"}
+      ]
+    },
+    "GeoMan": {
+      "source": "folium.plugins.geoman",
+      "js": [
+        {"name": "leaflet_geoman_js", "url": "https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js"}
+      ],
+      "css": [
+        {"name": "leaflet_geoman_css", "url": "https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css"}
+      ]
+    },
+    "GroupedLayerControl": {
+      "source": "folium.plugins.groupedlayercontrol",
+      "js": [
+        {"name": "leaflet.groupedlayercontrol.min.js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.js"}
+      ],
+      "css": [
+        {"name": "leaflet.groupedlayercontrol.min.css", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-groupedlayercontrol/0.6.1/leaflet.groupedlayercontrol.min.css"}
+      ]
+    },
+    "HeatMap": {
+      "source": "folium.plugins.heat_map",
+      "js": [
+        {"name": "leaflet-heat.js", "url": "https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js"}
+      ],
+      "css": []
+    },
+    "HeatMapWithTime": {
+      "source": "folium.plugins.heat_map_withtime",
+      "js": [
+        {"name": "iso8601", "url": "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js"},
+        {"name": "leaflet.timedimension.min.js", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js"},
+        {"name": "heatmap.min.js", "url": "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_hm.min.js"},
+        {"name": "leaflet-heatmap.js", "url": "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/pa7_leaflet_hm.min.js"}
+      ],
+      "css": [
+        {"name": "leaflet.timedimension.control.min.css", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css"}
+      ]
+    },
+    "LocateControl": {
+      "source": "folium.plugins.locate_control",
+      "js": [
+        {"name": "Control_locate_min_js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.js"}
+      ],
+      "css": [
+        {"name": "Control_locate_min_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-locatecontrol/0.66.2/L.Control.Locate.min.css"}
+      ]
+    },
+    "MarkerCluster": {
+      "source": "folium.plugins.marker_cluster",
+      "js": [
+        {"name": "markerclusterjs", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js"}
+      ],
+      "css": [
+        {"name": "markerclustercss", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css"},
+        {"name": "markerclusterdefaultcss", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css"}
+      ]
+    },
+    "MeasureControl": {
+      "source": "folium.plugins.measure_control",
+      "js": [
+        {"name": "leaflet-measure", "url": "https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.js"}
+      ],
+      "css": [
+        {"name": "leaflet-measure-css", "url": "https://cdn.jsdelivr.net/gh/ljagis/leaflet-measure@2.1.7/dist/leaflet-measure.min.css"}
+      ]
+    },
+    "MiniMap": {
+      "source": "folium.plugins.minimap",
+      "js": [
+        {"name": "Control_MiniMap_js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.js"}
+      ],
+      "css": [
+        {"name": "Control_MiniMap_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.css"}
+      ]
+    },
+    "MousePosition": {
+      "source": "folium.plugins.mouse_position",
+      "js": [
+        {"name": "Control_MousePosition_js", "url": "https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.js"}
+      ],
+      "css": [
+        {"name": "Control_MousePosition_css", "url": "https://cdn.jsdelivr.net/gh/ardhi/Leaflet.MousePosition/src/L.Control.MousePosition.min.css"}
+      ]
+    },
+    "OverlappingMarkerSpiderfier": {
+      "source": "folium.plugins.overlapping_marker_spiderfier",
+      "js": [
+        {"name": "overlappingmarkerjs", "url": "https://cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js"}
+      ],
+      "css": []
+    },
+    "StripePattern": {
+      "source": "folium.plugins.pattern",
+      "js": [
+        {"name": "pattern", "url": "https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js"}
+      ],
+      "css": []
+    },
+    "CirclePattern": {
+      "source": "folium.plugins.pattern",
+      "js": [
+        {"name": "pattern", "url": "https://teastman.github.io/Leaflet.pattern/leaflet.pattern.js"}
+      ],
+      "css": []
+    },
+    "PolyLineOffset": {
+      "source": "folium.plugins.polyline_offset",
+      "js": [
+        {"name": "polylineoffset", "url": "https://cdn.jsdelivr.net/npm/leaflet-polylineoffset@1.1.1/leaflet.polylineoffset.min.js"}
+      ],
+      "css": []
+    },
+    "PolyLineTextPath": {
+      "source": "folium.plugins.polyline_text_path",
+      "js": [
+        {"name": "textpath", "url": "https://cdn.jsdelivr.net/npm/leaflet-textpath@1.2.3/leaflet.textpath.min.js"}
+      ],
+      "css": []
+    },
+    "Realtime": {
+      "source": "folium.plugins.realtime",
+      "js": [
+        {"name": "Leaflet_Realtime_js", "url": "https://cdnjs.cloudflare.com/ajax/libs/leaflet-realtime/2.2.0/leaflet-realtime.js"}
+      ],
+      "css": []
+    },
+    "ScrollZoomToggler": {
+      "source": "folium.plugins.scroll_zoom_toggler",
+      "js_inline_url": "https://cdnjs.cloudflare.com/ajax/libs/ionicons/2.0.1/png/512/arrow-move.png",
+      "note": "CDN URL is inside Jinja template HTML, not default_js/default_css",
+      "js": [],
+      "css": []
+    },
+    "Search": {
+      "source": "folium.plugins.search",
+      "js": [
+        {"name": "leaflet-search-js", "url": "https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.js"}
+      ],
+      "css": [
+        {"name": "leaflet-search-css", "url": "https://cdn.jsdelivr.net/npm/leaflet-search@2.9.7/dist/leaflet-search.min.css"}
+      ]
+    },
+    "SemiCircle": {
+      "source": "folium.plugins.semicircle",
+      "js": [
+        {"name": "semicirclejs", "url": "https://cdn.jsdelivr.net/npm/leaflet-semicircle@2.0.4/Semicircle.min.js"}
+      ],
+      "css": []
+    },
+    "SideBySideLayers": {
+      "source": "folium.plugins.side_by_side",
+      "js": [
+        {"name": "leaflet.sidebyside", "url": "https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"}
+      ],
+      "css": []
+    },
+    "TagFilterButton": {
+      "source": "folium.plugins.tag_filter_button",
+      "js": [
+        {"name": "tag-filter-button.js", "url": "https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.js"},
+        {"name": "easy-button.js", "url": "https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.js"}
+      ],
+      "css": [
+        {"name": "tag-filter-button.css", "url": "https://cdn.jsdelivr.net/npm/leaflet-tag-filter-button/src/leaflet-tag-filter-button.css"},
+        {"name": "easy-button.css", "url": "https://cdn.jsdelivr.net/npm/leaflet-easybutton@2/src/easy-button.css"},
+        {"name": "ripples.min.css", "url": "https://cdn.jsdelivr.net/npm/css-ripple-effect@1.0.5/dist/ripple.min.css"}
+      ]
+    },
+    "Terminator": {
+      "source": "folium.plugins.terminator",
+      "js": [
+        {"name": "terminator", "url": "https://unpkg.com/@joergdietrich/leaflet.terminator"}
+      ],
+      "css": []
+    },
+    "TimeSliderChoropleth": {
+      "source": "folium.plugins.time_slider_choropleth",
+      "js": [
+        {"name": "d3v4", "url": "https://d3js.org/d3.v4.min.js"},
+        {"name": "moment", "url": "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"}
+      ],
+      "css": []
+    },
+    "Timeline": {
+      "source": "folium.plugins.timeline",
+      "js": [
+        {"name": "timeline", "url": "https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js"},
+        {"name": "moment", "url": "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"}
+      ],
+      "css": []
+    },
+    "TimelineSlider": {
+      "source": "folium.plugins.timeline",
+      "js": [
+        {"name": "timeline", "url": "https://cdn.jsdelivr.net/npm/leaflet.timeline@1.6.0/dist/leaflet.timeline.min.js"},
+        {"name": "moment", "url": "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"}
+      ],
+      "css": []
+    },
+    "TimestampedGeoJson": {
+      "source": "folium.plugins.timestamped_geo_json",
+      "js": [
+        {"name": "jquery3.7.1", "url": "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"},
+        {"name": "jqueryui1.10.2", "url": "https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.2/jquery-ui.min.js"},
+        {"name": "iso8601", "url": "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js"},
+        {"name": "leaflet.timedimension", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js"},
+        {"name": "moment", "url": "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"}
+      ],
+      "css": [
+        {"name": "highlight.js_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/styles/default.min.css"},
+        {"name": "leaflet.timedimension_css", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css"}
+      ]
+    },
+    "TimestampedWmsTileLayers": {
+      "source": "folium.plugins.timestamped_wmstilelayer",
+      "js": [
+        {"name": "jquery3.7.1", "url": "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"},
+        {"name": "jqueryui1.10.2", "url": "https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.2/jquery-ui.min.js"},
+        {"name": "iso8601", "url": "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js"},
+        {"name": "leaflet.timedimension", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js"}
+      ],
+      "css": [
+        {"name": "highlight.js_css", "url": "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/styles/default.min.css"},
+        {"name": "leaflet.timedimension_css", "url": "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css"}
+      ]
+    },
+    "TreeLayerControl": {
+      "source": "folium.plugins.treelayercontrol",
+      "js": [
+        {"name": "L.Control.Layers.Tree.min.js", "url": "https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.js"}
+      ],
+      "css": [
+        {"name": "L.Control.Layers.Tree.min.css", "url": "https://cdn.jsdelivr.net/npm/leaflet.control.layers.tree@1.1.0/L.Control.Layers.Tree.min.css"}
+      ]
+    },
+    "VectorGridProtobuf": {
+      "source": "folium.plugins.vectorgrid_protobuf",
+      "js": [
+        {"name": "vectorGrid", "url": "https://unpkg.com/leaflet.vectorgrid@latest/dist/Leaflet.VectorGrid.bundled.js"}
+      ],
+      "css": []
+    },
+    "WebGLEarth": {
+      "source": "folium.plugins.webgl_earth",
+      "js": [
+        {"name": "webglearth_v2_js", "url": "https://www.webglearth.com/v2/api.js"}
+      ],
+      "css": []
+    }
+  }
+}

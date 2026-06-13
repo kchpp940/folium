@@ -12,6 +12,9 @@ from folium.template import Template
 from folium.utilities import JsCode, camelize
 
 
+__all__: list[str] = []
+
+
 def leaflet_method(fn):
     @wraps(fn)
     def inner(self, *args, **kwargs):

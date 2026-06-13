@@ -21,6 +21,15 @@ from folium.utilities import (
 )
 
 
+__all__ = [
+    "Circle",
+    "CircleMarker",
+    "Polygon",
+    "PolyLine",
+    "Rectangle",
+]
+
+
 def path_options(
     line: bool = False, radius: Optional[float] = None, **kwargs: TypePathOptions
 ):

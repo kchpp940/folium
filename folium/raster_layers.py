@@ -21,6 +21,14 @@ from folium.utilities import (
 )
 
 
+__all__ = [
+    "ImageOverlay",
+    "TileLayer",
+    "VideoOverlay",
+    "WmsTileLayer",
+]
+
+
 class TileLayer(Layer):
     """
     Create a tile layer to append on a Map.

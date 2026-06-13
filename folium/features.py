@@ -56,6 +56,25 @@ from folium.utilities import (
 from folium.vector_layers import Circle, CircleMarker, PolyLine, path_options
 
 
+__all__ = [
+    "Choropleth",
+    "ClickForLatLng",
+    "ClickForMarker",
+    "ColorLine",
+    "Control",
+    "CustomIcon",
+    "DivIcon",
+    "GeoJson",
+    "GeoJsonPopup",
+    "GeoJsonTooltip",
+    "LatLngPopup",
+    "RegularPolygonMarker",
+    "TopoJson",
+    "Vega",
+    "VegaLite",
+]
+
+
 class RegularPolygonMarker(JSCSSMixin, Marker):
     """
     Custom markers using the Leaflet Data Vis Framework.

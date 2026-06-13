@@ -24,6 +24,20 @@ from folium.utilities import (
 )
 
 
+__all__ = [
+    "FeatureGroup",
+    "FitBounds",
+    "FitOverlays",
+    "Icon",
+    "LayerControl",
+    "LayerGroup",
+    "Marker",
+    "Popup",
+    "Tooltip",
+    "CustomPane",
+]
+
+
 class classproperty:
     def __init__(self, f):
         self.f = f
