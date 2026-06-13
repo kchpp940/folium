@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+"""Single entry point for the folium marker-audit check.
+
+Runs ``pytest --collect-only`` over the full test tree and verifies that
+every collected item complies with the tiering contract enforced by
+``tests/conftest.py::pytest_collection_modifyitems``.
+
+Exit codes
+----------
+0  all items pass the structural check
+4  one or more items violate the marker rules (emitted by the hook)
+
+Usage
+-----
+    python scripts/marker-audit          # local
+    tox -e marker-audit                  # via tox
+    # CI: "Marker audit" step in every workflow calls this script.
+"""
+
+import subprocess
+import sys
+
+
+def main() -> int:
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests", "--collect-only", "-q"],
+    )
+    return result.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

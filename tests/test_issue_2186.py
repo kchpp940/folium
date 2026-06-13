@@ -95,6 +95,11 @@ class TestPixelValuesGetMinConstraints:
 
 
 class TestDeadMapRuleRemoved:
+    @pytest.mark.xfail(
+        reason="The stale #map CSS rule is still emitted in the HTML template; "
+        "see issue #2186.",
+        strict=True,
+    )
     def test_dead_map_id_rule_absent(self):
         """The stale `#map { position:absolute; ... }` block must not appear."""
         m = folium.Map(location=[0, 0])

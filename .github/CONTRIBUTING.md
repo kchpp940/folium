@@ -142,7 +142,7 @@ you break them, `pytest` exits immediately with code 4, before any test runs.
 The single entry point for structural checks is:
 
 ```bash
-python -m pytest tests --collect-only -q
+python scripts/marker-audit
 # or via tox:
 tox -e marker-audit
 ```
@@ -152,8 +152,11 @@ test carries the right markers.  If it exits with code 4, read the error
 message to find which test is missing which marker.
 
 Every tox environment declares `depends = marker-audit`, so `tox` (without
-`-e`) always runs the audit first.  Every CI workflow also runs this exact
-same command as a "Marker audit" step before executing any tests.
+`-e`) always runs the audit first.  Every CI workflow also calls
+`python scripts/marker-audit` as a "Marker audit" step before executing
+any tests.  The command is defined in **one place** only
+([scripts/marker-audit](file:///Users/pkcha/folium/scripts/marker-audit));
+tox and CI never duplicate the raw pytest invocation.
 
 ### Running Tests
 

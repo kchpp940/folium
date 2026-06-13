@@ -41,7 +41,7 @@ jobs:
       run: pip install selenium pillow
 
     - name: Marker audit
-      run: python -m pytest tests --collect-only -q
+      run: python scripts/marker-audit
 
     - name: Selenium tests
       run: |
