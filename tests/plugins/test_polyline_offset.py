@@ -3,14 +3,13 @@ Test PolyLineOffset
 -------------------
 """
 
-import json
-import re
-
 import pytest
 
 import folium
 from folium import plugins
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 @pytest.mark.parametrize("offset", [0, 10, -10])
@@ -47,35 +46,33 @@ def test_polylineoffset(offset):
     assert script in out
 
     # We verify that the script part is correct.
-    expected_options = {
-        "bubblingMouseEvents": True,
-        "color": "#3388ff",
-        "dashArray": None,
-        "dashOffset": None,
-        "fill": False,
-        "fillColor": "#3388ff",
-        "fillOpacity": 0.2,
-        "fillRule": "evenodd",
-        "lineCap": "round",
-        "lineJoin": "round",
-        "noClip": False,
-        "offset": offset,
-        "opacity": 1.0,
-        "smoothFactor": 1.0,
-        "stroke": True,
-        "weight": 3,
-    }
+    expected_rendered = f"""
+    var {polylineoffset.get_name()} = L.polyline(
+    {locations},
+    {{
+    "bubblingMouseEvents": true,
+    "color": "#3388ff",
+    "dashArray": null,
+    "dashOffset": null,
+    "fill": false,
+    "fillColor": "#3388ff",
+    "fillOpacity": 0.2,
+    "fillRule": "evenodd",
+    "lineCap": "round",
+    "lineJoin": "round",
+    "noClip": false,
+    "offset": {offset},
+    "opacity": 1.0,
+    "smoothFactor": 1.0,
+    "stroke": true,
+    "weight": 3
+    }}
+    )
+    .addTo({m.get_name()});
+    """
 
     rendered = polylineoffset._template.module.script(polylineoffset)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    assert rendered_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    assert rendered_options == expected_options
-
-    assert 'L.polyline(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
+    assert normalize(expected_rendered) == normalize(rendered)
 
 
 def test_polylineoffset_without_offset():
@@ -94,32 +91,30 @@ def test_polylineoffset_without_offset():
     assert script in out
 
     # We verify that the script part is correct.
-    expected_options = {
-        "bubblingMouseEvents": True,
-        "color": "#3388ff",
-        "dashArray": None,
-        "dashOffset": None,
-        "fill": False,
-        "fillColor": "#3388ff",
-        "fillOpacity": 0.2,
-        "fillRule": "evenodd",
-        "lineCap": "round",
-        "lineJoin": "round",
-        "noClip": False,
-        "offset": 0,
-        "opacity": 1.0,
-        "smoothFactor": 1.0,
-        "stroke": True,
-        "weight": 3,
-    }
+    expected_rendered = f"""
+    var {polylineoffset.get_name()} = L.polyline(
+    {locations},
+    {{
+    "bubblingMouseEvents": true,
+    "color": "#3388ff",
+    "dashArray": null,
+    "dashOffset": null,
+    "fill": false,
+    "fillColor": "#3388ff",
+    "fillOpacity": 0.2,
+    "fillRule": "evenodd",
+    "lineCap": "round",
+    "lineJoin": "round",
+    "noClip": false,
+    "offset": 0,
+    "opacity": 1.0,
+    "smoothFactor": 1.0,
+    "stroke": true,
+    "weight": 3
+    }}
+    )
+    .addTo({m.get_name()});
+    """
 
     rendered = polylineoffset._template.module.script(polylineoffset)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    assert rendered_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    assert rendered_options == expected_options
-
-    assert 'L.polyline(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
+    assert normalize(expected_rendered) == normalize(rendered)

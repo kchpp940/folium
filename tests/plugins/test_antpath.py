@@ -3,10 +3,14 @@ Test AntPath
 -------------
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_antpath():
@@ -44,7 +48,7 @@ def test_antpath():
     tmpl = Template("""
           {{this.get_name()}} = L.polyline.antPath(
                   {{ this.locations|tojson }},
-                  {{ this.options|safe_js_options }}
+                  {{ this.options|tojavascript }}
                 )
                 .addTo({{this._parent.get_name()}});
         """)  # noqa

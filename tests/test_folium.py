@@ -7,7 +7,6 @@ Folium Tests
 import json
 import os
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,6 +17,8 @@ import folium
 from folium import TileLayer
 from folium.features import Choropleth, GeoJson
 from folium.template import Template
+
+pytestmark = pytest.mark.core
 
 rootpath = os.path.abspath(os.path.dirname(__file__))
 
@@ -285,6 +286,7 @@ class TestFolium:
         key_on field is dtype = str, while column 0 is dtype = int
         All geometries have matching values (no nan_fill_color allowed)
         """
+        gpd = pytest.importorskip("geopandas", reason="geopandas not installed")
         with open(os.path.join(rootpath, "geo_grid.json")) as f:
             geo_data = json.load(f)
 
@@ -316,6 +318,7 @@ class TestFolium:
         key_on field is dtype = str, while column 0 is dtype = object (mixed int and str)
         All geometries have matching values (no nan_fill_color allowed)
         """
+        gpd = pytest.importorskip("geopandas", reason="geopandas not installed")
         with open(os.path.join(rootpath, "geo_grid.json")) as f:
             geo_data = json.load(f)
 
@@ -362,6 +365,7 @@ class TestFolium:
         key_on field and column 0 from data are both strings.
         All geometries have matching values (no nan_fill_color allowed)
         """
+        gpd = pytest.importorskip("geopandas", reason="geopandas not installed")
         with open(os.path.join(rootpath, "geo_grid.json")) as f:
             geo_data = json.load(f)
 
@@ -507,6 +511,7 @@ class TestFolium:
         assert m.global_switches.no_touch
         assert m.global_switches.disable_3d
 
+    @pytest.mark.external_data
     def test_json_request(self):
         """Test requests for remote GeoJSON files."""
         self.m = folium.Map(zoom_start=4)

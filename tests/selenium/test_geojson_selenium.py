@@ -1,8 +1,12 @@
+import pytest
 from selenium.webdriver.common.by import By
 
 import folium
 import folium.plugins
 from folium.utilities import temp_html_filepath
+
+
+pytestmark = [pytest.mark.selenium, pytest.mark.external_data]
 
 
 def test_geojson(driver):

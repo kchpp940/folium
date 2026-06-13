@@ -5,11 +5,18 @@ import subprocess
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
-import nbconvert
 import pytest
+
+pytest.importorskip("nbconvert", reason="nbconvert not installed")
+pytest.importorskip("jupytext", reason="jupytext not installed")
+
+import nbconvert
 from selenium.common.exceptions import UnexpectedAlertPresentException
 
 from folium.utilities import temp_html_filepath
+
+
+pytestmark = [pytest.mark.selenium, pytest.mark.external_data]
 
 
 def find_notebooks():

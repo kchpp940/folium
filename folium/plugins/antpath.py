@@ -28,8 +28,8 @@ class AntPath(JSCSSMixin, BaseMultiLocation):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this.get_name() }} = L.polyline.antPath(
-              {{ this.locations|safe_js_value }},
-              {{ this.options|safe_js_options }}
+              {{ this.locations|tojson }},
+              {{ this.options|tojavascript }}
         ).addTo({{this._parent.get_name()}});
         {% endmacro %}
         """)

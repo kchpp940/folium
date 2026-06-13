@@ -40,13 +40,13 @@ class TimeSliderChoropleth(JSCSSMixin, Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
         {
-            let timestamps = {{ this.timestamps|safe_js_value }};
-            let styledict = {{ this.styledict|safe_js_value }};
+            let timestamps = {{ this.timestamps|tojson }};
+            let styledict = {{ this.styledict|tojson }};
             let current_timestamp = timestamps[{{ this.init_timestamp }}];
 
             function formatDate(date) {
                var newdate = new moment(date);
-               return newdate.format({{this.date_format|safe_js_value}});
+               return newdate.format({{this.date_format|tojson}});
             }
 
             let slider_body = d3.select("body").insert("div", "div.folium-map")
@@ -117,7 +117,7 @@ class TimeSliderChoropleth(JSCSSMixin, Layer):
             {% endif %}
 
             var {{ this.get_name() }} = L.geoJson(
-                {{ this.data|safe_js_value }},
+                {{ this.data|tojson }},
                 {onEachFeature: onEachFeature}
             );
 

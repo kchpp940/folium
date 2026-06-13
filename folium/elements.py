@@ -121,7 +121,7 @@ class EventHandler(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name()}}.{{ this.method }}(
-                {{ this.event|safe_js_value }},
+                {{ this.event|tojson}},
                 {{ this.handler.js_code }}
             );
         {% endmacro %}
@@ -155,7 +155,7 @@ class IncludeStatement(MacroElement):
 
     _template = Template("""
         {{ this.leaflet_class_name }}.include(
-            {{ this.options | safe_js_options }}
+            {{ this.options | tojavascript }}
         )
     """)
 
@@ -175,9 +175,9 @@ class MethodCall(MacroElement):
         {% macro script(this, kwargs) %}
             {{ this.target }}.{{ this.method }}(
                 {% for arg in this.args %}
-                    {{ arg | safe_js_value }},
+                    {{ arg | tojavascript }},
                 {% endfor %}
-                {{ this.kwargs | safe_js_options }}
+                {{ this.kwargs | tojavascript }}
             );
         {% endmacro %}
     """)

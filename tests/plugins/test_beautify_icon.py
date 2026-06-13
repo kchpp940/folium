@@ -4,10 +4,14 @@ Test BeautifyIcon
 
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_beautify_icon():
@@ -44,7 +48,7 @@ def test_beautify_icon():
 
     # We verify that the Beautiful Icons are rendered correctly.
     tmpl = Template("""
-                var {{this.get_name()}} = new L.BeautifyIcon.icon({{ this.options|safe_js_options }})
+                var {{this.get_name()}} = new L.BeautifyIcon.icon({{ this.options|tojavascript }})
                 {{this._parent.get_name()}}.setIcon({{this.get_name()}});
             """)  # noqa
 

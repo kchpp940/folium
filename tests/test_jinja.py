@@ -3,6 +3,8 @@
 import jinja2
 import pytest
 
+pytestmark = pytest.mark.core
+
 
 @pytest.mark.parametrize(
     "obj, expected",

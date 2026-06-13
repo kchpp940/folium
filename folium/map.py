@@ -22,7 +22,6 @@ from folium.utilities import (
     remove_empty,
     validate_location,
 )
-from folium.safe_serialize import safe_css_value, safe_html, safe_js_options, safe_text
 
 
 class classproperty:
@@ -167,7 +166,7 @@ class FeatureGroup(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.featureGroup(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
         {% endmacro %}
         """)
@@ -218,7 +217,7 @@ class LayerGroup(Layer):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.layerGroup(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
         {% endmacro %}
         """)
@@ -275,19 +274,19 @@ class LayerControl(MacroElement):
             var {{ this.get_name() }}_layers = {
                 base_layers : {
                     {%- for key, val in this.base_layers.items() %}
-                    {{ key|safe_layer_name }} : {{val}},
+                    {{ key|tojson }} : {{val}},
                     {%- endfor %}
                 },
                 overlays :  {
                     {%- for key, val in this.overlays.items() %}
-                    {{ key|safe_layer_name }} : {{val}},
+                    {{ key|tojson }} : {{val}},
                     {%- endfor %}
                 },
             };
             let {{ this.get_name() }} = L.control.layers(
                 {{ this.get_name() }}_layers.base_layers,
                 {{ this.get_name() }}_layers.overlays,
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             ).addTo({{this._parent.get_name()}});
 
             {%- if this.draggable %}
@@ -368,7 +367,7 @@ class Icon(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.AwesomeMarkers.icon(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
         {% endmacro %}
 
@@ -376,9 +375,9 @@ class Icon(MacroElement):
             {% if this.is_hex %}
             <style>
                 /* Dynamically generated CSS to replace the sprite image with a colored teardrop */
-                .awesome-marker-icon-{{ this.color_name|safe_css_identifier }} {
+                .awesome-marker-icon-{{ this.color_name }} {
                     background-image: none;
-                    background-color: {{ this.color|safe_css_value }};
+                    background-color: {{ this.color }};
                     width: 35px;
                     height: 35px;
                     border-radius: 50% 50% 50% 0;
@@ -392,7 +391,7 @@ class Icon(MacroElement):
                     justify-content: center;
                 }
                 /* Counter-rotate the inner icon so it stands up straight */
-                .awesome-marker-icon-{{ this.color_name|safe_css_identifier }} i {
+                .awesome-marker-icon-{{ this.color_name }} i {
                     transform: rotate(45deg);
                 }
             </style>
@@ -495,8 +494,8 @@ class Marker(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.marker(
-                {{ this.location|safe_js_value }},
-                {{ this.options|safe_js_options }}
+                {{ this.location|tojson }},
+                {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)
@@ -582,18 +581,7 @@ class Popup(MacroElement):
     Parameters
     ----------
     html: string or Element
-        Content of the Popup. If `text` is None, this is used as the
-        content. If `is_html` is False (default), the content is treated
-        as plain text and HTML-escaped. If `is_html` is True, the content
-        is treated as HTML and sanitized with a tag/attribute whitelist.
-        If an Element is passed, it is treated as fully trusted HTML.
-    text: string or None, default None
-        Plain text content of the Popup. If provided, this takes precedence
-        over `html` and is always treated as plain text (HTML-escaped).
-    is_html: bool, default False
-        If True, the `html` parameter is treated as HTML content and
-        sanitized. If False (default), the `html` parameter is treated
-        as plain text and HTML-escaped.
+        Content of the Popup.
     parse_html: bool, default False
         True if the popup is a template that needs to the rendered first.
     max_width: int for pixels or text for percentages, default '100%'
@@ -607,7 +595,7 @@ class Popup(MacroElement):
     """
 
     _template = Template("""
-        var {{this.get_name()}} = L.popup({{ this.options|safe_js_options }});
+        var {{this.get_name()}} = L.popup({{ this.options|tojavascript }});
 
         {% for name, element in this.html._children.items() %}
             {% if this.lazy %}
@@ -631,8 +619,6 @@ class Popup(MacroElement):
     def __init__(
         self,
         html: Union[str, Element, None] = None,
-        text: Optional[str] = None,
-        is_html: bool = False,
         parse_html: bool = False,
         max_width: Union[str, int] = "100%",
         show: bool = False,
@@ -650,63 +636,13 @@ class Popup(MacroElement):
         self.html._parent = self
         self.script._parent = self
 
-        # =====================================================================
-        # Parameter compatibility assertions — prevent semantic bypass
-        # =====================================================================
-
-        # Rule 1: text and html (non-None) cannot both be provided
-        if text is not None and html is not None:
-            raise ValueError(
-                "`text` and `html` cannot both be provided. "
-                "Use `text` for plain/sanitized text content, or `html` for HTML content."
-            )
-
-        # Rule 2: is_html is meaningless when html is an Element (Element is trusted)
-        if is_html and isinstance(html, Element):
-            raise ValueError(
-                "`is_html=True` is not needed when `html` is already an Element object — "
-                "those are implicitly treated as fully trusted HTML. "
-                "Remove the `is_html=True` flag."
-            )
-
-        # Rule 3: parse_html=True + is_html=True is contradictory
-        # parse_html=True → Html(script=False) auto-escapes HTML entities,
-        # so treating input as HTML makes no sense — the tags would be escaped.
-        if parse_html and is_html:
-            raise ValueError(
-                "`parse_html=True` and `is_html=True` cannot both be set. "
-                "`parse_html=True` causes the content to be HTML-escaped by the Html element, "
-                "which contradicts treating the input as HTML markup."
-            )
-
         script = not parse_html
 
         if isinstance(html, Element):
             self.html.add_child(html)
-        elif text is not None:
-            if script:
-                if is_html:
-                    processed = safe_html(str(text))
-                else:
-                    processed = safe_text(str(text))
-                processed = escape_backticks(processed)
-            else:
-                if is_html:
-                    # parse_html=True + is_html is blocked by Rule 3, shouldn't reach here
-                    processed = str(text)
-                else:
-                    processed = str(text)
-            self.html.add_child(Html(processed, script=script))
         elif isinstance(html, str):
-            if script:
-                if is_html:
-                    processed = safe_html(html)
-                else:
-                    processed = safe_text(html)
-                processed = escape_backticks(processed)
-            else:
-                processed = html
-            self.html.add_child(Html(processed, script=script))
+            html = escape_backticks(html)
+            self.html.add_child(Html(html, script=script))
 
         self.show = show
         self.lazy = lazy
@@ -739,18 +675,9 @@ class Tooltip(MacroElement):
 
     Parameters
     ----------
-    text: str or None, default None
-        String to display as a tooltip on the object. Treated as plain text
-        (HTML-escaped) by default unless `is_html=True`.
-        If `html` is also provided, `text` is ignored.
-    html: str or None, default None
-        HTML content to display. If provided, takes precedence over `text`
-        and is treated as HTML content (sanitized with tag/attribute whitelist).
-        To get fully trusted (unsanitized) HTML, use a Popup with Element instead.
-    is_html: bool, default False
-        Only applies when `text` is provided. If True, the `text` content is
-        treated as HTML and sanitized with a tag/attribute whitelist.
-        **Cannot** be combined with `html` parameter (html is always sanitized HTML).
+    text: str
+        String to display as a tooltip on the object. If the argument is of a
+        different type it will be converted to str.
     style: str, default None.
         HTML inline style properties like font and colors. Will be applied to
         a div with the text in it.
@@ -760,31 +687,22 @@ class Tooltip(MacroElement):
         These values will map directly to the Leaflet Options. More info
         available here: https://leafletjs.com/reference.html#tooltip
 
-    Security Notes
-    --------------
-    Default behavior (no flags set) is safe:
-    - `Tooltip("...")` or `Tooltip(text="...")` → fully escaped (display literally)
-    - `Tooltip(html="...")` → whitelist-sanitized (only safe tags/attrs pass)
-    - `Tooltip(text="...", is_html=True)` → whitelist-sanitized
-
     """
 
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.bindTooltip(
-                `<div{% if this.style %} style="{{ this.style|safe_css_value }}"{% endif %}>
-                     {% if this.is_html %}{{ this.content|safe_html }}{% else %}{{ this.content|safe_text }}{% endif %}
+                `<div{% if this.style %} style={{ this.style|tojson }}{% endif %}>
+                     {{ this.text }}
                  </div>`,
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
         {% endmacro %}
         """)
 
     def __init__(
         self,
-        text: Optional[str] = None,
-        html: Optional[str] = None,
-        is_html: bool = False,
+        text: str,
         style: Optional[str] = None,
         sticky: bool = True,
         **kwargs: TypeJsonValue,
@@ -792,33 +710,7 @@ class Tooltip(MacroElement):
         super().__init__()
         self._name = "Tooltip"
 
-        # =====================================================================
-        # Parameter compatibility assertions — prevent semantic bypass
-        # =====================================================================
-
-        # Rule 1: text and html cannot both be provided (ambiguous precedence)
-        if text is not None and html is not None:
-            raise ValueError(
-                "`text` and `html` cannot both be provided. "
-                "Use `text` for plain/sanitized text, or `html` for HTML content."
-            )
-
-        # Rule 2: is_html only applies to `text` — makes no sense with `html`
-        if is_html and html is not None:
-            raise ValueError(
-                "`is_html=True` can only be used with `text` parameter. "
-                "The `html` parameter is always treated as HTML content (sanitized)."
-            )
-
-        if html is not None:
-            self.content = str(html)
-            self.is_html = True
-        elif text is not None:
-            self.content = str(text)
-            self.is_html = is_html
-        else:
-            self.content = ""
-            self.is_html = False
+        self.text = str(text)
 
         kwargs.update({"sticky": sticky})
         self.options = remove_empty(**kwargs)
@@ -827,7 +719,8 @@ class Tooltip(MacroElement):
             assert isinstance(
                 style, str
             ), "Pass a valid inline HTML style property string to style."
-            self.style = safe_css_value(style)
+            # noqa outside of type checking.
+            self.style = style
 
 
 class FitBounds(MacroElement):
@@ -854,8 +747,8 @@ class FitBounds(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             {{ this._parent.get_name() }}.fitBounds(
-                {{ this.bounds|safe_js_value }},
-                {{ this.options|safe_js_value }}
+                {{ this.bounds|tojson }},
+                {{ this.options|tojson }}
             );
         {% endmacro %}
         """)
@@ -904,7 +797,7 @@ class FitOverlays(MacroElement):
                 }
             });
             if (bounds.isValid()) {
-                {{ this._parent.get_name() }}.{{ this.method }}(bounds, {{ this.options|safe_js_options }});
+                {{ this._parent.get_name() }}.{{ this.method }}(bounds, {{ this.options|tojavascript }});
             }
         }
         {{ this._parent.get_name() }}.on('overlayadd', customFlyToBounds);
@@ -955,8 +848,8 @@ class CustomPane(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = {{ this._parent.get_name() }}.createPane(
-                {{ this.name|safe_js_value }});
-            {{ this.get_name() }}.style.zIndex = {{ this.z_index|safe_js_value }};
+                {{ this.name|tojson }});
+            {{ this.get_name() }}.style.zIndex = {{ this.z_index|tojson }};
             {% if not this.pointer_events %}
                 {{ this.get_name() }}.style.pointerEvents = 'none';
             {% endif %}

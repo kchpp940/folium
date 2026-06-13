@@ -62,12 +62,12 @@ class MiniMap(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.tile_layer.get_name() }} = L.tileLayer(
-                {{ this.tile_layer.tiles|safe_url }},
-                {{ this.tile_layer.options|safe_js_options }}
+                {{ this.tile_layer.tiles|tojson }},
+                {{ this.tile_layer.options|tojson }}
             );
             var {{ this.get_name() }} = new L.Control.MiniMap(
                 {{ this.tile_layer.get_name() }},
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
             {{ this._parent.get_name() }}.addControl({{ this.get_name() }});
         {% endmacro %}

@@ -66,8 +66,8 @@ _default_css = [
 class GlobalSwitches(Element):
     _template = Template("""
         <script>
-            L_NO_TOUCH = {{ this.no_touch |safe_js_value }};
-            L_DISABLE_3D = {{ this.disable_3d|safe_js_value }};
+            L_NO_TOUCH = {{ this.no_touch |tojson}};
+            L_DISABLE_3D = {{ this.disable_3d|tojson }};
         </script>
     """)
 
@@ -220,23 +220,23 @@ class Map(JSCSSMixin, Evented):
             </style>
 
             <script>
-                L_NO_TOUCH = {{ this.global_switches.no_touch |safe_js_value}};
-                L_DISABLE_3D = {{ this.global_switches.disable_3d|safe_js_value }};
+                L_NO_TOUCH = {{ this.global_switches.no_touch |tojson}};
+                L_DISABLE_3D = {{ this.global_switches.disable_3d|tojson }};
             </script>
 
         {% endmacro %}
 
         {% macro html(this, kwargs) %}
-            <div class="folium-map" id={{ this.get_name()|safe_js_value }} ></div>
+            <div class="folium-map" id={{ this.get_name()|tojson }} ></div>
         {% endmacro %}
 
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.map(
-                {{ this.get_name()|safe_js_value }},
+                {{ this.get_name()|tojson }},
                 {
-                    center: {{ this.location|safe_js_value }},
+                    center: {{ this.location|tojson }},
                     crs: L.CRS.{{ this.crs }},
-                    ...{{this.options|safe_js_options}}
+                    ...{{this.options|tojavascript}}
 
                 }
             );
@@ -246,7 +246,7 @@ class Map(JSCSSMixin, Evented):
             {%- endif %}
 
             {%- if this.zoom_control_position %}
-            L.control.zoom( { position: {{ this.zoom_control|safe_js_value }} } ).addTo({{ this.get_name() }});
+            L.control.zoom( { position: {{ this.zoom_control|tojson }} } ).addTo({{ this.get_name() }});
             {%- endif %}
 
             {% if this.objects_to_stay_in_front %}

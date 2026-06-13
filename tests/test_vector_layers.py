@@ -5,9 +5,12 @@ Test Vector Layers
 """
 
 import json
-import re
+
+import pytest
 
 from folium import Map
+
+pytestmark = pytest.mark.core
 from folium.utilities import get_bounds, normalize
 from folium.vector_layers import (
     Circle,
@@ -79,19 +82,7 @@ def test_circle():
     """  # noqa
 
     rendered = circle._template.module.script(circle)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.circle(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert circle.get_bounds() == [location, location]
     assert json.dumps(circle.to_dict()) == circle.to_json()
     assert circle.location == [-27.551667, -48.478889]
@@ -159,19 +150,7 @@ def test_circle_marker():
     """  # noqa
 
     rendered = circle_marker._template.module.script(circle_marker)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.circleMarker(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert circle_marker.get_bounds() == expected_bounds
     assert json.dumps(circle_marker.to_dict()) == circle_marker.to_json()
     assert circle_marker.location == location
@@ -237,19 +216,7 @@ def test_rectangle():
     """
 
     rendered = rectangle._template.module.script(rectangle)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.rectangle(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert rectangle.get_bounds() == location
     assert json.dumps(rectangle.to_dict()) == rectangle.to_json()
     assert rectangle.options == expected_options
@@ -314,19 +281,7 @@ def test_polygon_marker():
     """
 
     rendered = polygon._template.module.script(polygon)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.polygon(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert polygon.get_bounds() == get_bounds(locations)
     assert json.dumps(polygon.to_dict()) == polygon.to_json()
     assert polygon.options == expected_options
@@ -382,19 +337,7 @@ def test_polyline():
     """
 
     rendered = polyline._template.module.script(polyline)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.polyline(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert polyline.get_bounds() == get_bounds(locations)
     assert json.dumps(polyline.to_dict()) == polyline.to_json()
     assert polyline.options == expected_options
@@ -455,19 +398,7 @@ def test_mulyipolyline():
     """
 
     rendered = multipolyline._template.module.script(multipolyline)
-
-    options_pattern = r',\s*(\{.*?\})\s*\)'
-    rendered_match = re.search(options_pattern, rendered, re.DOTALL)
-    expected_match = re.search(options_pattern, expected_rendered, re.DOTALL)
-    assert rendered_match is not None
-    assert expected_match is not None
-    rendered_options = json.loads(rendered_match.group(1))
-    expected_options_json = json.loads(expected_match.group(1))
-    assert rendered_options == expected_options_json
-
-    assert 'L.polyline(' in rendered
-    assert f'.addTo({m.get_name()})' in rendered
-
+    assert normalize(rendered) == normalize(expected_rendered)
     assert multipolyline.get_bounds() == get_bounds(locations)
     assert json.dumps(multipolyline.to_dict()) == multipolyline.to_json()
     assert multipolyline.options == expected_options

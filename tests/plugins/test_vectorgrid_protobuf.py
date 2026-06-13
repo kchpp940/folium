@@ -4,10 +4,13 @@ Test VectorGridProtobuf
 """
 
 import json
+import pytest
 
 import folium
 from folium.plugins import VectorGridProtobuf
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_vectorgrid():

@@ -5,10 +5,13 @@ Test pattern
 """
 
 import os
+import pytest
 
 import folium
 from folium import plugins
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_pattern():

@@ -4,10 +4,14 @@ Test GeoMan
 
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_geoman():
@@ -20,7 +24,7 @@ def test_geoman():
     # the map
     tmpl = Template("""
         {{this.get_name()}}.addControls(
-            {{this.options|safe_js_options}}
+            {{this.options|tojavascript}}
         )
     """)
 

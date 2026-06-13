@@ -12,6 +12,8 @@ import pytest
 from branca.element import Element
 
 import folium
+
+pytestmark = pytest.mark.core
 from folium import Choropleth, ClickForMarker, GeoJson, Map, Popup
 from folium.elements import EventHandler
 from folium.utilities import JsCode
@@ -99,13 +101,7 @@ def test_divicon():
     div = folium.DivIcon(html=html)
     assert isinstance(div, Element)
     assert div.options["class_name"] == "empty"
-    # html is now wrapped in JsCode for proper JS serialization
-    from folium.utilities import JsCode
-    assert isinstance(div.options["html"], JsCode)
-    # The JsCode should contain the HTML as a properly escaped JS string
-    # js_code is a JSON string with quotes escaped as \", so we check for that
-    js_code = div.options["html"].js_code
-    assert html.replace('"', '\\"') in js_code or 'height=\\"100\\"' in js_code
+    assert div.options["html"] == html
 
 
 # ColorLine.

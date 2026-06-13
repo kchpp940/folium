@@ -9,6 +9,8 @@ from folium.plugins.webgl_earth import (
 )
 from folium.utilities import JsCode
 
+pytestmark = pytest.mark.plugins
+
 # ─────────────────────────── WebGLEarth ───────────────────────────
 
 

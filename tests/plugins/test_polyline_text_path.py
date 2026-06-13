@@ -3,10 +3,14 @@ Test PolyLineTextPath
 ---------------
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_polyline_text_path():
@@ -50,7 +54,7 @@ def test_polyline_text_path():
     tmpl = Template("""
         {{ this.polyline.get_name() }}.setText(
             "{{this.text}}",
-            {{ this.options|safe_js_options }}
+            {{ this.options|tojavascript }}
         );
         """)
 

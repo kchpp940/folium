@@ -75,9 +75,7 @@ The basic workflow for contributing is:
 7. Make changes to your local copy of the folium repository
 8. Make sure the tests pass:
    * in the repository folder do `pip install -e . --no-deps`  (needed for notebook tests)
-   * run `python -m pytest tests --ignore=tests/selenium`
-   * run `python -m pytest tests/selenium`
-   * resolve all errors
+   * see [Test Categories and Markers](#test-categories-and-markers) below for how to run different test categories
 9. Commit those changes
     ```
     git add file1 file2 file3
@@ -90,6 +88,116 @@ The basic workflow for contributing is:
 11. [Open a pull request](https://help.github.com/articles/creating-a-pull-request/) to the python-visualization/folium
 
 Since we're all volunteers please help us by making your PR easy to review. That means having a clear description and only touching code that's necessary for your change.
+
+## Test Categories and Markers
+
+Folium uses pytest markers to categorize tests by stability, speed, and dependencies.
+This allows you to run only the tests you need, and avoids failures from missing
+optional dependencies or network issues.
+
+### Available Markers
+
+Markers are registered in both
+[pyproject.toml](file:///Users/pkcha/folium/pyproject.toml) (under
+`[tool.pytest.ini_options].markers`) and
+[tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py)
+(via `pytest_configure`).  They come in two flavours:
+
+| Marker | Type | Description | Default | Dependencies |
+|--------|------|-------------|---------|--------------|
+| `core` | **category** | Fast, stable unit tests for folium core (features, map, utilities, vector_layers, …) | ✅ Runs by default | None |
+| `plugins` | **category** | Tests for `folium.plugins.*` (stable HTML-rendering tests) | ✅ Runs by default | None |
+| `external_data` | **gate** | Requires `geodatasets`, live `requests` calls, or remote APIs. Needs `--run-external-data`. | ❌ Skipped | `geodatasets`, network |
+| `render` | **gate** | Slow PNG rendering with `pixelmatch` against golden screenshots. Needs `--run-render`. | ❌ Skipped | `pixelmatch`, `pillow`, `selenium` |
+| `selenium` | **gate** | Browser automation driven by Selenium / Chrome. Needs `--run-selenium`. | ❌ Skipped | `selenium`, Chrome webdriver |
+
+A **category** marker is informational: you combine it with `-m` to *select* a
+subset (e.g. `-m plugins`).  A **gate** marker is opt-in: without the matching
+`--run-*` CLI flag the test is SKIPPED, regardless of `-m`.
+
+### Skip-Reason Cheat-Sheet
+
+`pytest -ra` prints all skip reasons at the end.  Recognise these two patterns:
+
+| Reason prefix | Meaning | What to do |
+|---------------|---------|------------|
+| `external_data: pass --run-external-data or --run-all` | Opt-in gate not enabled. | Pass the flag, or ignore (intended for local dev). |
+| `render: pass --run-render or --run-all` | Same, for the render gate. | Pass the flag. |
+| `selenium: pass --run-selenium or --run-all` | Same, for the selenium gate. | Pass the flag. |
+| `… --run-<tier> passed but <dep> is not installed (pip install …)` | You explicitly asked for the tier, but the machine is missing a Python package. | Install the dependency named in the message. |
+
+The distinction matters: the first group is “you asked for a smaller set”, the
+second is “you asked for the full set but the environment is incomplete”.
+Neither means your code is broken.  If `core` / `plugins` tests fail, *that* is
+a code regression.
+
+### Running Tests
+
+```bash
+# Default: run core + plugins tests (fast, stable, no network, no browser).
+# Gate-tagged tests (external_data/render/selenium) will show as SKIPPED.
+python -m pytest tests --ignore=tests/selenium --ignore=tests/snapshots
+
+# Also run tests that hit geodatasets or the network.
+python -m pytest tests --ignore=tests/selenium --ignore=tests/snapshots --run-external-data
+
+# Run PNG snapshot tests (needs selenium + pixelmatch + pillow + Chrome).
+python -m pytest tests/snapshots --run-render --run-selenium --run-external-data
+
+# Run browser automation tests.
+python -m pytest tests/selenium --run-selenium --run-external-data
+
+# Run EVERYTHING (all gates open).
+python -m pytest tests --run-all
+
+# Selection examples using markers (-m).
+python -m pytest tests -m "core"                     # only core
+python -m pytest tests -m "plugins"                  # only plugins
+python -m pytest tests -m "core or plugins"          # default tier (same as no -m)
+python -m pytest tests -m "not external_data"        # exclude a gate
+python -m pytest tests -m "plugins and not external"  # only stable plugins
+```
+
+### Using Tox
+
+[tox.ini](file:///Users/pkcha/folium/tox.ini) documents every environment with
+a tier matrix comment block at the top.
+
+```bash
+# Default tests (core + plugins).  This is what every PR runs in CI.
+tox -e py
+
+# Default + external_data (geodatasets + network).
+tox -e py-external
+
+# PNG pixelmatch snapshot tier (selenium + pixelmatch + pillow).
+tox -e py-render
+
+# Selenium browser tier.
+tox -e py-selenium
+
+# All tiers combined.
+tox -e py-all
+
+# Fastest inner-loop run (compact output, no gate-tagged tests collected).
+tox -e quick
+
+# Pre-release gate: all tiers + mypy type-checking.
+tox -e release-check
+```
+
+### CI Trigger Labels
+
+For pull requests, optional tiers (render, selenium) are skipped by default to
+keep feedback fast.  Add a label to force them to run for your PR:
+
+- `run-selenium` → triggers [test_selenium.yml](file:///Users/pkcha/folium/.github/workflows/test_selenium.yml)
+- `run-render` → triggers [test_snapshots.yml](file:///Users/pkcha/folium/.github/workflows/test_snapshots.yml)
+
+The main [test_code.yml](file:///Users/pkcha/folium/.github/workflows/test_code.yml)
+always runs `core + plugins` on every PR and push.  Its `external_data` job
+runs on push to `main` and on the daily schedule.  The full tier-to-job matrix
+is documented in the header of that file.
 
 ## Plugin acceptance criteria
 

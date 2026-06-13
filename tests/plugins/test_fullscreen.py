@@ -4,10 +4,14 @@ Test Fullscreen
 
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_fullscreen():
@@ -19,7 +23,7 @@ def test_fullscreen():
     # verify that the fullscreen control was rendered
     tmpl = Template("""
         L.control.fullscreen(
-            {{ this.options|safe_js_options }}
+            {{ this.options|tojavascript }}
         ).addTo({{this._parent.get_name()}});
     """)
 

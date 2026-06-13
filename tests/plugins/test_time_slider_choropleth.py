@@ -17,14 +17,16 @@ from folium.plugins import TimeSliderChoropleth
 from folium.utilities import normalize
 
 
-@pytest.mark.xfail(sys.version_info[0:2] == (3, 8), reason="too modern for py38")
+geodatasets = pytest.importorskip("geodatasets", reason="geodatasets not installed")
+gpd = pytest.importorskip("geopandas", reason="geopandas not installed")
+
+
+@pytest.mark.plugins
+@pytest.mark.external_data
 def test_timedynamic_geo_json():
     """
     tests folium.plugins.TimeSliderChoropleth
     """
-    import geodatasets
-    import geopandas as gpd
-
     datapath = geodatasets.get_path("naturalearth land")
     gdf = gpd.read_file(datapath)
 

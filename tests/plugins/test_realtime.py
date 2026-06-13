@@ -3,10 +3,14 @@ Test Realtime
 ------------------
 """
 
+import pytest
+
 import folium
 from folium.plugins import MarkerCluster, Realtime
 from folium.template import Template
 from folium.utilities import JsCode, normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_realtime():

@@ -49,7 +49,7 @@ class Search(JSCSSMixin, MacroElement):
                 {% if this.search_label %}
                 propertyName: '{{this.search_label}}',
                 {% endif %}
-                collapsed: {{this.collapsed|safe_js_value}},
+                collapsed: {{this.collapsed|tojson|safe}},
                 textPlaceholder: '{{this.placeholder}}',
                 position:'{{this.position}}',
             {% if this.geom_type == 'Point' %}
@@ -71,7 +71,7 @@ class Search(JSCSSMixin, MacroElement):
                         return feature.properties.style
                     })
                     {% if this.options %}
-                    e.layer.setStyle({{ this.options|safe_js_options }});
+                    e.layer.setStyle({{ this.options|tojavascript }});
                     {% endif %}
                     if(e.layer._popup)
                         e.layer.openPopup();

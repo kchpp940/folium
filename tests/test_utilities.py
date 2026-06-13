@@ -3,6 +3,8 @@ import pandas as pd
 import pytest
 
 from folium import FeatureGroup, Map, Marker, Popup
+
+pytestmark = pytest.mark.core
 from folium.utilities import (
     JsCode,
     _is_url,

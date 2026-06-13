@@ -3,10 +3,14 @@ Test DualMap
 ------------
 """
 
+import pytest
+
 import folium
 import folium.plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_dual_map():

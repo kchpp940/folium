@@ -4,10 +4,13 @@ Test OverlappingMarkerSpiderfier
 """
 
 import numpy as np
+import pytest
 
 from folium.folium import Map
 from folium.map import Marker
 from folium.plugins.overlapping_marker_spiderfier import OverlappingMarkerSpiderfier
+
+pytestmark = pytest.mark.plugins
 
 
 def test_oms_js_inclusion():

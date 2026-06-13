@@ -1,7 +1,11 @@
+import pytest
+
 from branca.element import Element
 
 from folium import JsCode
 from folium.template import Environment, Template, _to_escaped_json, tojavascript
+
+pytestmark = pytest.mark.core
 
 
 def test_tojavascript_with_jscode():

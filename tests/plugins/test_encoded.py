@@ -1,9 +1,13 @@
 """Test PolyLineFromEncoded Plugin."""
 
+import pytest
+
 from folium import Map
 from folium.plugins import PolygonFromEncoded, PolyLineFromEncoded
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_polyline_from_encoded():
@@ -31,7 +35,7 @@ def test_polyline_from_encoded():
     tmpl = Template("""
         var {{this.get_name()}} = L.Polyline.fromEncoded(
                         {{ this.encoded|tojson }},
-                        {{ this.options|safe_js_options }}
+                        {{ this.options|tojavascript }}
         ).addTo({{this._parent.get_name()}});
         """)
 
@@ -65,7 +69,7 @@ def test_polygon_from_encoded():
     tmpl = Template("""
         var {{this.get_name()}} = L.Polygon.fromEncoded(
                             {{ this.encoded|tojson }},
-                            {{ this.options|safe_js_options }}
+                            {{ this.options|tojavascript }}
         )
         .addTo({{this._parent.get_name()}});
         """)

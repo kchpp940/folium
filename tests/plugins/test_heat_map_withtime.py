@@ -4,11 +4,14 @@ Test HeatMapWithTime
 """
 
 import numpy as np
+import pytest
 
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_heat_map_with_time():

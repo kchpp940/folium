@@ -24,7 +24,7 @@ class MeasureControl(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.Control.Measure(
-                {{ this.options|safe_js_options }});
+                {{ this.options|tojavascript }});
             {{this._parent.get_name()}}.addControl({{this.get_name()}});
 
             // Workaround for using this plugin with Leaflet>=1.8.0

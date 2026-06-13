@@ -4,10 +4,14 @@ Test BoatMarker
 
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_boat_marker():
@@ -33,7 +37,7 @@ def test_boat_marker():
     tmpl = Template("""
         var {{ this.get_name() }} = L.boatMarker(
             {{ this.location|tojson }},
-            {{ this.options|safe_js_options }}
+            {{ this.options|tojavascript }}
         ).addTo({{ this._parent.get_name() }});
         {{ this.get_name() }}.setHeadingWind(
             {{ this.heading }},
@@ -60,7 +64,7 @@ def test_boat_marker_with_no_wind_speed_or_heading():
     tmpl = Template("""
         var {{ this.get_name() }} = L.boatMarker(
             {{ this.location|tojson }},
-            {{ this.options|safe_js_options }}
+            {{ this.options|tojavascript }}
         ).addTo({{ this._parent.get_name() }});
         {{ this.get_name() }}.setHeading({{ this.heading }});
     """)

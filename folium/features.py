@@ -53,13 +53,6 @@ from folium.utilities import (
     remove_empty,
     validate_locations,
 )
-from folium.safe_serialize import (
-    safe_css_value,
-    safe_html,
-    safe_text,
-    trusted_html as _trusted_html_func,
-    _escape_js_string_for_html,
-)
 from folium.vector_layers import Circle, CircleMarker, PolyLine, path_options
 
 
@@ -91,8 +84,8 @@ class RegularPolygonMarker(JSCSSMixin, Marker):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.RegularPolygonMarker(
-                {{ this.location|safe_js_value }},
-                {{ this.options|safe_js_options }}
+                {{ this.location|tojson }},
+                {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)
@@ -555,11 +548,11 @@ class GeoJson(Layer):
         function {{ this.get_name() }}_styler(feature) {
             switch({{ this.feature_identifier }}) {
                 {%- for style, ids_list in this.style_map.items() if not style == 'default' %}
-                {% for id_val in ids_list %}case {{ id_val|safe_js_value }}: {% endfor %}
-                    return {{ style|safe_json_to_js }};
+                {% for id_val in ids_list %}case {{ id_val|tojson }}: {% endfor %}
+                    return {{ style }};
                 {%- endfor %}
                 default:
-                    return {{ this.style_map['default']|safe_json_to_js }};
+                    return {{ this.style_map['default'] }};
             }
         }
         {%- endif %}
@@ -567,20 +560,20 @@ class GeoJson(Layer):
         function {{ this.get_name() }}_highlighter(feature) {
             switch({{ this.feature_identifier }}) {
                 {%- for style, ids_list in this.highlight_map.items() if not style == 'default' %}
-                {% for id_val in ids_list %}case {{ id_val|safe_js_value }}: {% endfor %}
-                    return {{ style|safe_json_to_js }};
+                {% for id_val in ids_list %}case {{ id_val|tojson }}: {% endfor %}
+                    return {{ style }};
                 {%- endfor %}
                 default:
-                    return {{ this.highlight_map['default']|safe_json_to_js }};
+                    return {{ this.highlight_map['default'] }};
             }
         }
         {%- endif %}
 
         {%- if this.marker %}
         function {{ this.get_name() }}_pointToLayer(feature, latlng) {
-            var opts = {{ this.marker.options | safe_js_options }};
+            var opts = {{ this.marker.options | tojavascript }};
             {% if this.marker._name == 'Marker' and this.marker.icon %}
-            const iconOptions = {{ this.marker.icon.options | safe_js_options }}
+            const iconOptions = {{ this.marker.icon.options | tojavascript }}
             const iconRootAlias = L{%- if this.marker.icon._name == "Icon" %}.AwesomeMarkers{%- endif %}
             opts.icon = new iconRootAlias.{{ this.marker.icon._name }}(iconOptions)
             {% endif %}
@@ -645,7 +638,7 @@ class GeoJson(Layer):
         };
         var {{ this.get_name() }} = L.geoJson(null, {
             {%- if this.smooth_factor is not none  %}
-                smoothFactor: {{ this.smooth_factor|safe_js_value }},
+                smoothFactor: {{ this.smooth_factor|tojson }},
             {%- endif %}
                 onEachFeature: {{ this.get_name() }}_onEachFeature,
             {% if this.style %}
@@ -654,7 +647,7 @@ class GeoJson(Layer):
             {%- if this.marker %}
                 pointToLayer: {{ this.get_name() }}_pointToLayer,
             {%- endif %}
-            ...{{this.options | safe_js_options }}
+            ...{{this.options | tojavascript }}
         });
 
         function {{ this.get_name() }}_add (data) {
@@ -662,9 +655,9 @@ class GeoJson(Layer):
                 .addData(data);
         }
         {%- if this.embed %}
-            {{ this.get_name() }}_add({{ this.data|safe_js_value }});
+            {{ this.get_name() }}_add({{ this.data|tojson }});
         {%- else %}
-            $.ajax({{ this.embed_link|safe_url }}, {dataType: 'json', async: false})
+            $.ajax({{ this.embed_link|tojson }}, {dataType: 'json', async: false})
                 .done({{ this.get_name() }}_add);
         {%- endif %}
 
@@ -987,7 +980,7 @@ class TopoJson(JSCSSMixin, Layer):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-            var {{ this.get_name() }}_data = {{ this.data|safe_js_value }};
+            var {{ this.get_name() }}_data = {{ this.data|tojson }};
             var {{ this.get_name() }} = L.geoJson(
                 topojson.feature(
                     {{ this.get_name() }}_data,
@@ -995,7 +988,7 @@ class TopoJson(JSCSSMixin, Layer):
                 ),
                 {
                 {%- if this.smooth_factor is not none %}
-                    smoothFactor: {{ this.smooth_factor|safe_js_value }},
+                    smoothFactor: {{ this.smooth_factor|tojson }},
                 {%- endif %}
                 }
             ).addTo({{ this._parent.get_name() }});
@@ -1125,28 +1118,19 @@ class GeoJsonDetail(MacroElement):
         } else if (typeof(feature)=='object') {
             return JSON.stringify(feature);
         } else {
-            return String(feature);
+            return feature;
         }
     }
-    let fields = {{ this.fields | safe_js_value }};
-    let aliases = {{ this.aliases | safe_js_value }};
-    let escapeHtml = text => {
-        if (text === null || text === undefined) return '';
-        return String(text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    };
+    let fields = {{ this.fields | tojson | safe }};
+    let aliases = {{ this.aliases | tojson | safe }};
     let table = '<table>' +
         String(
         fields.map(
         (v,i)=>
         `<tr>{% if this.labels %}
-            <th>${escapeHtml(aliases[i]{% if this.localize %}.toLocaleString(){% endif %})}</th>
+            <th>${aliases[i]{% if this.localize %}.toLocaleString(){% endif %}}</th>
             {% endif %}
-            <td>${escapeHtml(handleObject(layer.feature.properties[v]){% if this.localize %}.toLocaleString(){% endif %})}</td>
+            <td>${handleObject(layer.feature.properties[v]){% if this.localize %}.toLocaleString(){% endif %}}</td>
         </tr>`).join(''))
     +'</table>';
     div.innerHTML=table;
@@ -1185,7 +1169,8 @@ class GeoJsonDetail(MacroElement):
             assert isinstance(
                 style, str
             ), "Pass a valid inline HTML style property string to style."
-            self.style = safe_css_value(style)
+            # noqa outside of type checking.
+            self.style = style
 
     def warn_for_geometry_collections(self) -> None:
         """Checks for GeoJson GeometryCollection features to warn user about incompatibility."""
@@ -1304,7 +1289,7 @@ class GeoJsonTooltip(GeoJsonDetail):
     {% macro script(this, kwargs) %}
     {{ this._parent.get_name() }}.bindTooltip("""
         + GeoJsonDetail.base_template
-        + """,{{ this.tooltip_options | safe_js_options }});
+        + """,{{ this.tooltip_options | tojavascript }});
                      {% endmacro %}
                      """
     )
@@ -1372,7 +1357,7 @@ class GeoJsonPopup(GeoJsonDetail):
     {% macro script(this, kwargs) %}
     {{ this._parent.get_name() }}.bindPopup("""
         + GeoJsonDetail.base_template
-        + """,{{ this.popup_options | safe_js_options }});
+        + """,{{ this.popup_options | tojavascript }});
                      {% endmacro %}
                      """
     )
@@ -1734,40 +1719,8 @@ class DivIcon(MacroElement):
         A custom class name to assign to the icon.
         Leaflet defaults is 'leaflet-div-icon' which draws a little white
         square with a shadow.  We set it 'empty' in folium.
-    html : string, Element, JsCode, or None, default None
-        Custom HTML content to put inside the div element.
-        - If **string** (default path): content is sanitized with a
-          tag/attribute whitelist (safe_html). Set `trusted_html=True`
-          to explicitly opt out of sanitization.
-        - If **Element** or **JsCode**: treated as fully trusted content,
-          no sanitization is applied. The user is responsible for safety.
-    text : string or None, default None
-        Plain text content to put inside the div element. If provided,
-        takes precedence over `html`.
-        - If `is_html=False` (default): content is fully HTML-escaped
-          (safe_text). All tags are displayed literally.
-        - If `is_html=True`: content is treated as HTML and sanitized
-          with a tag/attribute whitelist (safe_html).
-    is_html : bool, default False
-        Only applies when `text` is provided. Controls whether `text`
-        is treated as plain text (escaped) or HTML (sanitized).
-        **Cannot** be combined with `html` or `trusted_html`.
-    trusted_html : bool, default False
-        Only applies when `html` is a string. If True, the HTML content
-        is treated as fully trusted and no sanitization is applied.
-        This is the explicit opt-in flag to bypass the whitelist.
-        **Cannot** be combined with `text` or when `html` is already
-        an Element/JsCode (those are implicitly trusted).
-
-    Security Notes
-    --------------
-    Default behavior (no flags set) is safe:
-    - `text="..."` → fully escaped (display literally)
-    - `html="..."` → whitelist-sanitized (only safe tags/attrs pass)
-
-    To get fully untrusted HTML, you must explicitly opt in via EITHER:
-    - `trusted_html=True` (when `html` is a string)
-    - Passing an `Element` or `JsCode` object as `html`
+    html : string
+        A custom HTML code to put inside the div element.
 
     See https://leafletjs.com/reference.html#divicon
 
@@ -1775,16 +1728,13 @@ class DivIcon(MacroElement):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-            var {{ this.get_name() }} = L.divIcon({{ this.options|safe_js_options }});
+            var {{ this.get_name() }} = L.divIcon({{ this.options|tojavascript }});
         {% endmacro %}
         """)  # noqa
 
     def __init__(
         self,
-        html: Optional[Union[str, Element, JsCode]] = None,
-        text: Optional[str] = None,
-        is_html: bool = False,
-        trusted_html: bool = False,
+        html: Optional[str] = None,
         icon_size: Optional[tuple[int, int]] = None,
         icon_anchor: Optional[tuple[int, int]] = None,
         popup_anchor: Optional[tuple[int, int]] = None,
@@ -1792,71 +1742,8 @@ class DivIcon(MacroElement):
     ):
         super().__init__()
         self._name = "DivIcon"
-
-        # =====================================================================
-        # Parameter compatibility assertions — prevent semantic bypass
-        # =====================================================================
-
-        # Rule 1: text and html cannot both be provided (ambiguous precedence)
-        if text is not None and html is not None:
-            raise ValueError(
-                "`text` and `html` cannot both be provided. "
-                "Use `text` for plain/sanitized text, or `html` for HTML content."
-            )
-
-        # Rule 2: is_html only applies to `text` — makes no sense with `html`
-        if is_html and html is not None:
-            raise ValueError(
-                "`is_html=True` can only be used with `text` parameter. "
-                "For `html`, use `trusted_html=True` to bypass whitelist sanitization."
-            )
-
-        # Rule 3: trusted_html only applies to string `html`, not to text
-        if trusted_html and text is not None:
-            raise ValueError(
-                "`trusted_html=True` can only be used with `html` parameter (string). "
-                "For `text` with HTML, use `is_html=True` instead."
-            )
-
-        # Rule 4: trusted_html is redundant (and confusing) when html is Element/JsCode
-        if trusted_html and isinstance(html, (Element, JsCode)):
-            raise ValueError(
-                "`trusted_html=True` is not needed when `html` is already an "
-                "Element/JsCode object — those are implicitly trusted. "
-                "Remove the `trusted_html=True` flag."
-            )
-
-        # =====================================================================
-        # Three-path processing pipeline
-        # =====================================================================
-
-        processed_html: Optional[JsCode] = None
-
-        if text is not None:
-            # --- Path 1: text parameter (safe_text / sanitized_html) ---
-            if is_html:
-                html_content = safe_html(str(text))
-            else:
-                html_content = safe_text(str(text))
-            processed_html = JsCode(_escape_js_string_for_html(html_content))
-
-        elif html is not None:
-            if isinstance(html, (Element, JsCode)):
-                # --- Path 2a: Element/JsCode (implicitly trusted) ---
-                if isinstance(html, Element):
-                    html_content = _trusted_html_func(html.render())
-                else:
-                    html_content = _trusted_html_func(str(html.js_code))
-            elif trusted_html:
-                # --- Path 2b: string + trusted_html=True (explicit opt-in) ---
-                html_content = _trusted_html_func(str(html))
-            else:
-                # --- Path 2c: string (default → whitelist sanitization) ---
-                html_content = safe_html(str(html))
-            processed_html = JsCode(_escape_js_string_for_html(html_content))
-
         self.options = remove_empty(
-            html=processed_html,
+            html=html,
             icon_size=icon_size,
             icon_anchor=icon_anchor,
             popup_anchor=popup_anchor,
@@ -2009,7 +1896,7 @@ class CustomIcon(Icon):
 
     _template = Template("""
         {% macro script(this, kwargs) %}
-        var {{ this.get_name() }} = L.icon({{ this.options|safe_js_options }});
+        var {{ this.get_name() }} = L.icon({{ this.options|tojavascript }});
         {% endmacro %}
         """)  # noqa
 
@@ -2135,9 +2022,9 @@ class Control(JSCSSMixin, Class):
       {% macro script(this, kwargs) %}
           var {{ this.get_name() }} = new L.Control.{{this._name}}(
               {% for arg in this.args %}
-                  {{ arg | safe_js_value }},
+                  {{ arg | tojavascript }},
               {% endfor %}
-              {{ this.options|safe_js_options }}
+              {{ this.options|tojavascript }}
           ).addTo({{ this._parent.get_name() }});
       {% endmacro %}
     """)

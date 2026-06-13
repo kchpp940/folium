@@ -48,7 +48,7 @@ class MousePosition(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.Control.MousePosition(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             );
             {{ this.get_name() }}.options["latFormatter"] =
                 {{ this.lat_formatter }};

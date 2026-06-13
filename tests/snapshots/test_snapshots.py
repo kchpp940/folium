@@ -4,9 +4,13 @@ import os
 import shutil
 
 import pytest
+
+pytest.importorskip("PIL", reason="Pillow not installed")
+pytest.importorskip("pixelmatch", reason="pixelmatch not installed")
+webdriver = pytest.importorskip("selenium.webdriver", reason="selenium not installed")
+
 from PIL import Image
 from pixelmatch.contrib.PIL import pixelmatch
-from selenium import webdriver
 
 options = webdriver.chrome.options.Options()
 options.add_argument("--headless")
@@ -16,6 +20,9 @@ paths = os.listdir("tests/snapshots/modules")
 paths = [p.replace(".py", "") for p in paths if p.endswith(".py")]
 
 
+@pytest.mark.render
+@pytest.mark.selenium
+@pytest.mark.external_data
 @pytest.mark.parametrize("path", paths)
 def test_screenshot(path: str):
     driver = webdriver.Chrome(options=options)

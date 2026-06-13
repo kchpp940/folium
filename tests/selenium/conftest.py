@@ -1,8 +1,13 @@
 import pytest
+
+pytest.importorskip("selenium", reason="selenium not installed")
+
 from selenium.webdriver import Chrome, ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import visibility_of_element_located
 from selenium.webdriver.support.ui import WebDriverWait
+
+pytestmark = pytest.mark.selenium
 
 
 @pytest.fixture(scope="session")

@@ -2,11 +2,18 @@ import base64
 import io
 import os
 
+import pytest
+
+pytest.importorskip("PIL", reason="Pillow not installed")
+
 from PIL import Image
 
 import folium
 from folium.plugins.heat_map import HeatMap
 from folium.utilities import temp_html_filepath
+
+
+pytestmark = [pytest.mark.selenium, pytest.mark.render]
 
 
 def test_heat_map_with_weights(driver):

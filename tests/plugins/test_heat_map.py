@@ -11,6 +11,8 @@ from folium.plugins import HeatMap
 from folium.template import Template
 from folium.utilities import normalize
 
+pytestmark = pytest.mark.plugins
+
 
 def test_heat_map():
     np.random.seed(3141592)

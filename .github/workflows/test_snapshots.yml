@@ -1,14 +1,27 @@
 name: Run Snapshot Tests
 
+# Tier: render (PNG pixelmatch) + selenium (browser driver) + external_data (network in modules)
+# See tests/conftest.py and .github/workflows/test_code.yml for the full matrix.
+#
+# Triggered on: schedule (daily), push to main, PRs labeled `run-render`.
+# Needs: pixelmatch + pillow + selenium + Chrome webdriver.
+# Renders each module in tests/snapshots/modules/*.py to PNG and diffs against
+# the golden image in tests/snapshots/screenshots/*.png.
+
 on:
+  schedule:
+    - cron: "0 13 * * *"
   pull_request:
+    types: [ labeled, opened, synchronize, reopened ]
   push:
     branches:
       - main
 
 jobs:
   run:
+    name: PNG Render Snapshot Tests
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-render')
     defaults:
       run:
         shell: bash -l {0}
@@ -36,7 +49,17 @@ jobs:
 
     - name: Test with pytest
       run: |
-        coverage run -p -m pytest tests/snapshots -s --junit-xml=test-results.xml
+        # Pass all three --run-* flags:
+        #   --run-render         → enable render gate (pixelmatch diff)
+        #   --run-selenium       → enable selenium gate (Chrome driver)
+        #   --run-external-data  → enable external_data gate (network in modules)
+        coverage run -p -m pytest tests/snapshots -s --junit-xml=test-results.xml \
+          --run-render \
+          --run-selenium \
+          --run-external-data
+        echo "=== Collected render-tier snapshot tests ==="
+        python -m pytest tests/snapshots --collect-only -q \
+          --run-render 2>&1 | tail -10
 
     - name: Surface failing tests
       if: always()

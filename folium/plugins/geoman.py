@@ -40,7 +40,7 @@ class GeoMan(JSCSSMixin, MacroElement):
             var drawnItems = drawnItems_{{ this.get_name() }};
 
             {{this.get_name()}}.addControls(
-                {{this.options|safe_js_options}}
+                {{this.options|tojavascript}}
             )
 
             drawnItems_{{ this.get_name() }}.eachLayer(function(layer){

@@ -44,3 +44,15 @@ line-length = 120
 
 [lint.per-file-ignores]
 "docs/conf.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-ra --strict-markers"
+markers = [
+    "core: Fast, stable unit tests (no network, no browser, no external data). These run by default.",
+    "plugins: Tests for folium plugins. These run by default.",
+    "external_data: Tests requiring geodatasets, network requests, or remote APIs. Requires --run-external-data flag.",
+    "render: Slow PNG rendering tests using pixelmatch comparison. Requires --run-render flag.",
+    "selenium: Browser automation tests requiring Selenium webdriver. Requires --run-selenium flag.",
+]

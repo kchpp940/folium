@@ -3,7 +3,10 @@ import io
 import branca
 import geopandas
 import pandas as pd
+import pytest
 import requests
+
+pytestmark = pytest.mark.external_data
 
 import folium
 

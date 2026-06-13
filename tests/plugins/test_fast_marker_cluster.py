@@ -12,6 +12,8 @@ from folium.plugins import FastMarkerCluster
 from folium.template import Template
 from folium.utilities import normalize
 
+pytestmark = pytest.mark.plugins
+
 
 def test_fast_marker_cluster():
     n = 100

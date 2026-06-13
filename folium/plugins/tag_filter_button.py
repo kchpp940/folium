@@ -43,7 +43,7 @@ class TagFilterButton(JSCSSMixin, MacroElement):
 
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = L.control.tagFilterButton(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             ).addTo({{ this._parent.get_name() }});
         {% endmacro %}
         """)

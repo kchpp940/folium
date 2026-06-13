@@ -12,7 +12,11 @@ Validates that:
 
 import re
 
+import pytest
+
 import folium
+
+pytestmark = pytest.mark.core
 
 
 def _get_map_css(m: folium.Map) -> str:

@@ -1,8 +1,9 @@
 from typing import Optional
 
+from jinja2 import Template
+
 from folium.elements import Element, JSCSSMixin, MacroElement
 from folium.map import Marker
-from folium.template import Template
 from folium.utilities import parse_options
 
 
@@ -42,7 +43,7 @@ class OverlappingMarkerSpiderfier(JSCSSMixin, MacroElement):
             try {
                 var oms = new OverlappingMarkerSpiderfier(
                     {{ this._parent.get_name() }},
-                    {{ this.options|safe_js_options }}
+                    {{ this.options|tojson }}
                 );
 
                 oms.addListener('spiderfy', function() {

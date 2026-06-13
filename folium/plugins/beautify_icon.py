@@ -55,7 +55,7 @@ class BeautifyIcon(JSCSSMixin, MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
             var {{ this.get_name() }} = new L.BeautifyIcon.icon(
-                {{ this.options|safe_js_options }}
+                {{ this.options|tojavascript }}
             )
             {{ this._parent.get_name() }}.setIcon({{ this.get_name() }});
         {% endmacro %}

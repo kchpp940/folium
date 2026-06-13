@@ -3,10 +3,14 @@ Test ScrollZoomToggler
 ----------------------
 """
 
+import pytest
+
 import folium
 from folium import plugins
 from folium.template import Template
 from folium.utilities import normalize
+
+pytestmark = pytest.mark.plugins
 
 
 def test_scroll_zoom_toggler():
