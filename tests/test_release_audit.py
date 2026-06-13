@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from folium.release_audit import (
+from folium._audit.resources import (
     AuditResult,
     FOLIUM_ROOT,
     _collect_resources_from_class,

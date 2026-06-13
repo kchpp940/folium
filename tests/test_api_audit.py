@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from folium.api_audit import (
+from folium._audit.api_audit import (
     AuditResult,
     check_all_defined,
     check_all_names_importable,
@@ -32,12 +32,14 @@ from folium.api_audit import (
     check_init_all_superset,
     check_internal_not_in_all,
     check_no_extra_public_names,
+    check_no_forbidden_toplevel_modules,
     run_api_audit,
 )
-from folium.api_policy import (
+from folium._audit.api_policy import (
     AUDITED_MODULES,
     COMPAT_ALIASES,
     EXPERIMENTAL_NAMES,
+    FORBIDDEN_TOPLEVEL_MODULES,
     INIT_REEXPORT_MODULES,
     INTERNAL_NAMES,
 )
@@ -50,7 +52,7 @@ class TestApiPolicyStructure:
     def test_policy_contains_only_data(self):
         import types
 
-        import folium.api_policy as policy
+        import folium._audit.api_policy as policy
 
         for name in dir(policy):
             if name.startswith("_"):
@@ -258,6 +260,43 @@ class TestApiBoundarySpecific:
         import folium
 
         assert not hasattr(folium, "api_audit") or "api_audit" not in folium.__all__
+
+    def test_release_audit_not_in_folium_init(self):
+        import folium
+
+        assert not hasattr(folium, "release_audit") or "release_audit" not in folium.__all__
+
+
+class TestApiAuditForbiddenToplevel:
+    def test_forbidden_toplevel_modules_are_shims(self):
+        result = AuditResult()
+        check_no_forbidden_toplevel_modules(result)
+        assert result.ok, (
+            "Forbidden top-level module violations:\n"
+            + "\n".join(f"  {f.location}: {f.message}" for f in result.errors)
+        )
+
+    def test_forbidden_toplevel_modules_covered_in_policy(self):
+        assert "api_audit" in FORBIDDEN_TOPLEVEL_MODULES
+        assert "api_policy" in FORBIDDEN_TOPLEVEL_MODULES
+        assert "release_audit" in FORBIDDEN_TOPLEVEL_MODULES
+
+
+class TestShimBackwardCompat:
+    def test_api_policy_shim_importable(self):
+        from folium.api_policy import AUDITED_MODULES as am
+
+        assert isinstance(am, set)
+
+    def test_api_audit_shim_importable(self):
+        from folium.api_audit import run_api_audit
+
+        assert callable(run_api_audit)
+
+    def test_release_audit_shim_importable(self):
+        from folium.release_audit import run_audit
+
+        assert callable(run_audit)
 
 
 class TestAuditResultDataclass:
