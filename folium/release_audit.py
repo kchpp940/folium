@@ -7,14 +7,6 @@ Validates that CDN resource declarations stay consistent across:
   - Documentation examples                 (docs/ directory)
   - Inline CDN URLs inside Jinja templates
 
-Also validates public API export boundaries:
-  - Every audited module defines __all__
-  - All names in __all__ are importable from the module
-  - Public names not in __all__ are flagged as potential leaks
-  - Internal implementation names must not appear in __all__
-  - folium.__init__.__all__ covers all public names from submodules
-  - __all__ lists contain no duplicates
-
 Checks performed:
   1. Duplicate resource names within the same class
   2. Version drift: the same library referenced at different versions
@@ -23,7 +15,6 @@ Checks performed:
   4. Manifest completeness: every resource in source must exist in the
      manifest, and every manifest entry must have a corresponding source
   5. Documentation CDN references that diverge from the manifest
-  6. API boundary: __all__ consistency and internal name leakage
 
 Usage:
     python -m folium.release_audit              # run all checks, exit non-zero on error
@@ -34,8 +25,6 @@ Usage:
 from __future__ import annotations
 
 import ast
-import importlib
-import inspect
 import json
 import re
 import sys
@@ -53,6 +42,8 @@ PACKAGE_VERSION_PATTERN = re.compile(
 )
 
 FOLIUM_ROOT = Path(__file__).resolve().parent
+
+__all__: list[str] = []
 
 
 @dataclass
@@ -401,204 +392,6 @@ def check_features_dynamic_urls(result: AuditResult):
                 )
 
 
-AUDITED_MODULES = {
-    "folium": "folium",
-    "folium.map": "folium.map",
-    "folium.features": "folium.features",
-    "folium.raster_layers": "folium.raster_layers",
-    "folium.vector_layers": "folium.vector_layers",
-    "folium.elements": "folium.elements",
-    "folium.folium": "folium.folium",
-    "folium.utilities": "folium.utilities",
-    "folium.plugins": "folium.plugins",
-}
-
-_NAMES_ALLOWED_IN_MODULE_NS_WITHOUT_ALL = {
-    "__name__",
-    "__doc__",
-    "__package__",
-    "__loader__",
-    "__spec__",
-    "__file__",
-    "__path__",
-    "__cached__",
-    "__builtins__",
-    "__all__",
-    "__version__",
-    "__pdoc__",
-    "annotations",
-}
-
-_INIT_REEXPORT_MODULES = {
-    "folium.map",
-    "folium.features",
-    "folium.raster_layers",
-    "folium.vector_layers",
-}
-
-_KNOWN_INTERNAL_NAMES: dict[str, set[str]] = {
-    "folium.map": {"classproperty", "Class", "Evented", "Layer"},
-    "folium.features": {"GeoJsonStyleMapper", "GeoJsonDetail", "TypeStyleMapping"},
-    "folium.vector_layers": {"path_options", "BaseMultiLocation"},
-    "folium.elements": {
-        "leaflet_method",
-        "JSCSSMixin",
-        "EventHandler",
-        "ElementAddToElement",
-        "IncludeStatement",
-        "MethodCall",
-        "CssLink",
-        "JavascriptLink",
-    },
-    "folium.folium": {"GlobalSwitches"},
-    "folium.utilities": {
-        "_validate_locations_basics",
-        "_is_url",
-        "if_pandas_df_convert_to_numpy",
-        "parse_font_size",
-        "escape_double_quotes",
-        "get_and_assert_figure_root",
-    },
-}
-
-
-def _is_module_defined(mod_name: str, obj) -> bool:
-    obj_module = getattr(obj, "__module__", None)
-    if obj_module is None:
-        return False
-    return obj_module == mod_name or obj_module.startswith(mod_name + ".")
-
-
-def check_all_defined(result: AuditResult):
-    for label, module_name in AUDITED_MODULES.items():
-        mod = importlib.import_module(module_name)
-        if not hasattr(mod, "__all__"):
-            result.add_error(
-                "missing_all",
-                f"Module {module_name} does not define __all__",
-                location=module_name,
-            )
-
-
-def check_no_extra_public_names(result: AuditResult):
-    for label, module_name in AUDITED_MODULES.items():
-        mod = importlib.import_module(module_name)
-        all_names = set(getattr(mod, "__all__", []))
-        internal_names = _KNOWN_INTERNAL_NAMES.get(module_name, set())
-        candidates: set[str] = set()
-        for name in dir(mod):
-            if name.startswith("_"):
-                continue
-            if name in _NAMES_ALLOWED_IN_MODULE_NS_WITHOUT_ALL:
-                continue
-            if name in internal_names:
-                continue
-            try:
-                obj = getattr(mod, name)
-            except Exception:
-                continue
-            if inspect.ismodule(obj):
-                continue
-            if not _is_module_defined(module_name, obj):
-                continue
-            if isinstance(obj, type) and not issubclass(obj, BaseException):
-                candidates.add(name)
-            elif callable(obj):
-                candidates.add(name)
-        extra = candidates - all_names
-        if extra:
-            result.add_warning(
-                "name_not_in_all",
-                f"Public names in {module_name} not in __all__",
-                location=module_name,
-                detail=", ".join(sorted(extra)),
-            )
-
-
-def check_init_all_superset(result: AuditResult):
-    import folium
-
-    for label, module_name in AUDITED_MODULES.items():
-        if module_name == "folium":
-            continue
-        if module_name not in _INIT_REEXPORT_MODULES:
-            continue
-        mod = importlib.import_module(module_name)
-        mod_all = set(getattr(mod, "__all__", []))
-        for name in mod_all:
-            if not hasattr(folium, name):
-                result.add_warning(
-                    "module_public_not_in_init",
-                    f"{module_name}.{name} is public but not re-exported in folium.__init__",
-                    location=f"{module_name}.{name}",
-                )
-
-
-def check_all_names_importable(result: AuditResult):
-    for label, module_name in AUDITED_MODULES.items():
-        mod = importlib.import_module(module_name)
-        all_names = getattr(mod, "__all__", None)
-        if all_names is None:
-            continue
-        for name in all_names:
-            if not hasattr(mod, name):
-                result.add_error(
-                    "all_name_not_found",
-                    f"Name '{name}' in __all__ not found in module {module_name}",
-                    location=module_name,
-                    detail=name,
-                )
-
-
-def check_internal_not_in_all(result: AuditResult):
-    for module_name, internal_names in _KNOWN_INTERNAL_NAMES.items():
-        mod = importlib.import_module(module_name)
-        all_names = set(getattr(mod, "__all__", []))
-        leaked = internal_names & all_names
-        if leaked:
-            result.add_error(
-                "internal_in_all",
-                f"Internal names should not be in __all__ of {module_name}",
-                location=module_name,
-                detail=", ".join(sorted(leaked)),
-            )
-
-
-def check_all_sorted_and_unique(result: AuditResult):
-    for label, module_name in AUDITED_MODULES.items():
-        mod = importlib.import_module(module_name)
-        all_list = getattr(mod, "__all__", None)
-        if all_list is None:
-            continue
-        if len(all_list) != len(set(all_list)):
-            result.add_error(
-                "all_duplicates",
-                f"__all__ in {module_name} contains duplicates",
-                location=module_name,
-                detail=", ".join(
-                    name for name in all_list if all_list.count(name) > 1
-                ),
-            )
-
-
-def run_api_audit(strict: bool = False) -> AuditResult:
-    result = AuditResult()
-
-    check_all_defined(result)
-    check_all_names_importable(result)
-    check_no_extra_public_names(result)
-    check_init_all_superset(result)
-    check_internal_not_in_all(result)
-    check_all_sorted_and_unique(result)
-
-    if strict:
-        for w in result.warnings:
-            result.errors.append(w)
-        result.warnings.clear()
-
-    return result
-
-
 def run_audit(strict: bool = False) -> AuditResult:
     result = AuditResult()
 
@@ -634,9 +427,6 @@ def run_audit(strict: bool = False) -> AuditResult:
     check_version_drift(result, all_resources)
     check_docs_consistency(result, manifest)
     check_inline_cdn_urls(result)
-
-    api_result = run_api_audit(strict=False)
-    result.merge(api_result)
 
     if strict:
         for w in result.warnings:

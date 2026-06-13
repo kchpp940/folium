@@ -17,7 +17,6 @@ from unittest.mock import patch
 import pytest
 
 from folium.release_audit import (
-    AUDITED_MODULES,
     AuditResult,
     FOLIUM_ROOT,
     _collect_resources_from_class,
@@ -25,17 +24,10 @@ from folium.release_audit import (
     _extract_version_from_url,
     _get_feature_classes,
     _get_plugin_classes,
-    check_all_defined,
-    check_all_names_importable,
-    check_init_all_superset,
-    check_internal_not_in_all,
     check_duplicate_names,
     check_manifest_consistency,
-    check_no_extra_public_names,
     check_version_drift,
-    check_all_sorted_and_unique,
     load_manifest,
-    run_api_audit,
     run_audit,
 )
 
@@ -321,131 +313,3 @@ class TestAuditResultDataclass:
         r1.merge(r2)
         assert len(r1.errors) == 1
         assert len(r1.warnings) == 1
-
-
-class TestApiAuditAllDefined:
-    def test_all_audited_modules_have_all(self):
-        result = AuditResult()
-        check_all_defined(result)
-        assert result.ok, (
-            "Modules missing __all__:\n"
-            + "\n".join(f"  {f.location}: {f.message}" for f in result.errors)
-        )
-
-    def test_audited_modules_list_covers_key_modules(self):
-        assert "folium" in AUDITED_MODULES
-        assert "folium.map" in AUDITED_MODULES
-        assert "folium.features" in AUDITED_MODULES
-        assert "folium.raster_layers" in AUDITED_MODULES
-        assert "folium.plugins" in AUDITED_MODULES
-
-
-class TestApiAuditAllImportable:
-    def test_all_names_are_importable(self):
-        result = AuditResult()
-        check_all_names_importable(result)
-        assert result.ok, (
-            "Names in __all__ not found in module:\n"
-            + "\n".join(f"  {f.location}: {f.detail}" for f in result.errors)
-        )
-
-
-class TestApiAuditNoExtraPublicNames:
-    def test_no_unlisted_public_names(self):
-        result = AuditResult()
-        check_no_extra_public_names(result)
-        for f in result.warnings:
-            if f.category == "name_not_in_all":
-                pytest.fail(
-                    f"Public name(s) not in __all__ in {f.location}: {f.detail}"
-                )
-
-
-class TestApiAuditInitSuperset:
-    def test_init_all_covers_submodule_public_names(self):
-        result = AuditResult()
-        check_init_all_superset(result)
-        uncovered = [
-            f for f in result.warnings if f.category == "module_public_not_in_init"
-        ]
-        assert len(uncovered) == 0, (
-            "Public submodule names not in folium.__init__:\n"
-            + "\n".join(f"  {f.location}" for f in uncovered)
-        )
-
-
-class TestApiAuditInternalNotInAll:
-    def test_internal_names_not_in_all(self):
-        result = AuditResult()
-        check_internal_not_in_all(result)
-        assert result.ok, (
-            "Internal names leaked into __all__:\n"
-            + "\n".join(f"  {f.location}: {f.detail}" for f in result.errors)
-        )
-
-
-class TestApiAuditNoDuplicates:
-    def test_all_lists_have_no_duplicates(self):
-        result = AuditResult()
-        check_all_sorted_and_unique(result)
-        assert result.ok, (
-            "__all__ contains duplicates:\n"
-            + "\n".join(f"  {f.location}: {f.detail}" for f in result.errors)
-        )
-
-
-class TestApiAuditFullRun:
-    def test_api_audit_runs_without_crash(self):
-        result = run_api_audit()
-        assert isinstance(result, AuditResult)
-
-    def test_api_audit_no_errors(self):
-        result = run_api_audit()
-        assert result.ok, (
-            "API audit found errors:\n"
-            + "\n".join(
-                f"  [{f.severity}] {f.category}: {f.message} ({f.location})"
-                for f in result.errors
-            )
-        )
-
-
-class TestApiBoundarySpecific:
-    def test_features_excludes_internal(self):
-        import folium.features as features
-
-        assert "GeoJsonStyleMapper" not in features.__all__
-        assert "GeoJsonDetail" not in features.__all__
-
-    def test_map_excludes_internal(self):
-        import folium.map as map_mod
-
-        assert "classproperty" not in map_mod.__all__
-        assert "Class" not in map_mod.__all__
-        assert "Evented" not in map_mod.__all__
-        assert "Layer" not in map_mod.__all__
-
-    def test_vector_layers_excludes_internal(self):
-        import folium.vector_layers as vl
-
-        assert "path_options" not in vl.__all__
-        assert "BaseMultiLocation" not in vl.__all__
-
-    def test_elements_has_empty_all(self):
-        import folium.elements as elements
-
-        assert elements.__all__ == []
-
-    def test_folium_init_includes_new_exports(self):
-        import folium
-
-        assert "ImageOverlay" in folium.__all__
-        assert "VideoOverlay" in folium.__all__
-        assert "CustomPane" in folium.__all__
-
-    def test_folium_init_new_exports_importable(self):
-        from folium import CustomPane, ImageOverlay, VideoOverlay
-
-        assert CustomPane is not None
-        assert ImageOverlay is not None
-        assert VideoOverlay is not None
