@@ -42,6 +42,9 @@ jobs:
     - name: Install folium from source
       run: python -m pip install -e . --no-deps --force-reinstall
 
+    - name: Run release resource audit
+      run: python -m folium.release_audit --strict
+
     - name: Run full test suite (all markers)
       run: |
         coverage run -p -m pytest tests -vv \

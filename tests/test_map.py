@@ -288,11 +288,6 @@ def test_marker_numpy_array_as_location():
 
 
 @pytest.mark.filterwarnings("ignore::UserWarning")
-@pytest.mark.xfail(
-    reason="Icon does not validate non-str color values; passes int through "
-    "to str.startswith(), raising AttributeError instead of UserWarning.",
-    strict=True,
-)
 def test_icon_invalid_marker_colors():
     pytest.warns(UserWarning, Icon, color="lila")
     pytest.warns(UserWarning, Icon, color=42)

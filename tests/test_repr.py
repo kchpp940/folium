@@ -10,6 +10,10 @@ import pytest
 
 import folium
 
+pytest.importorskip("PIL", reason="Pillow not installed")
+
+import PIL.Image
+
 pytestmark = pytest.mark.core
 
 
@@ -52,7 +56,6 @@ def test__repr_png_no_image(m):
 @pytest.mark.render
 @pytest.mark.selenium
 def test__repr_png_is_bytes(m_png):
-    pytest.importorskip("PIL", reason="Pillow not installed")
     png = m_png._repr_png_()
     assert isinstance(png, bytes)
 
@@ -60,9 +63,6 @@ def test__repr_png_is_bytes(m_png):
 @pytest.mark.render
 @pytest.mark.selenium
 def test_valid_png(m_png):
-    PIL = pytest.importorskip("PIL", reason="Pillow not installed")
-    import PIL.Image  # noqa: F811
-
     png = m_png._repr_png_()
     img = PIL.Image.open(io.BytesIO(png))
     assert isinstance(img, PIL.PngImagePlugin.PngImageFile)
@@ -71,8 +71,6 @@ def test_valid_png(m_png):
 @pytest.mark.render
 @pytest.mark.selenium
 def test_valid_png_size(m_png):
-    PIL = pytest.importorskip("PIL", reason="Pillow not installed")
-    import PIL.Image  # noqa: F811
     from folium.utilities import _parse_size
 
     w = h = 500

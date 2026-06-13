@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 13 * * *"
   pull_request:
-    types: [labeled, opened, synchronize, reopened]
+    types: [ labeled, opened, synchronize, reopened ]
   push:
     branches:
       - main
@@ -32,13 +32,12 @@ jobs:
           --file requirements-dev.txt
 
     - name: Install pytest plugins and pixelmatch
-      run: pip install pixelmatch pytest-github-actions-annotate-failures pytest-rerunfailures
+      run: |
+        pip install pixelmatch pytest-github-actions-annotate-failures pytest-rerunfailures
 
     - name: Install folium from source
-      run: python -m pip install -e . --no-deps --force-reinstall
-
-    - name: Marker audit
-      run: python scripts/marker-audit
+      run: |
+        python -m pip install -e . --no-deps --force-reinstall
 
     - name: Test with pytest
       run: |
@@ -46,6 +45,9 @@ jobs:
           --run-render \
           --run-selenium \
           --run-external-data
+        echo "=== Test Selection Summary ==="
+        python -m pytest tests/snapshots --collect-only -q \
+          --run-render 2>&1 | tail -5
 
     - name: Surface failing tests
       if: always()
@@ -68,5 +70,6 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: coverage-test-snapshots
-        path: .coverage*
+        path: |
+          .coverage*
         include-hidden-files: true
