@@ -52,6 +52,15 @@ jobs:
     - name: Install folium from source
       run: python -m pip install -e . --no-deps --force-reinstall
 
+    - name: Marker audit (structural check)
+      run: |
+        # Fail fast (exit code 4) if any test is missing a category marker
+        # or carries gate markers without a category.  This is a collect-only
+        # pass – no test code executes here.
+        python -m pytest tests --collect-only -q \
+          --ignore=tests/selenium \
+          --ignore=tests/snapshots
+
     - name: Run core and plugin tests
       run: |
         # Explicitly select `core or plugins` via -m.  Gate-tagged tests
@@ -118,6 +127,15 @@ jobs:
     - name: Install geodatasets
       run: |
         pip install geodatasets
+
+    - name: Marker audit (structural check)
+      run: |
+        # Fail fast (exit code 4) if any test breaks the marker rules.
+        # Same collect-only pass as the core job, just to make sure the
+        # structural invariant holds on the external-data matrix as well.
+        python -m pytest tests --collect-only -q \
+          --ignore=tests/selenium \
+          --ignore=tests/snapshots
 
     - name: Run external data tests
       run: |

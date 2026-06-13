@@ -131,6 +131,48 @@ second is “you asked for the full set but the environment is incomplete”.
 Neither means your code is broken.  If `core` / `plugins` tests fail, *that* is
 a code regression.
 
+### Writing New Tests
+
+**Every test you add MUST be marked.**  The CI marker-audit step (and the
+`pytest_collection_modifyitems` hook in [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py))
+will *hard-fail* collection (exit code 4) if any of these rules are broken:
+
+1. **Pick exactly one category marker** and apply it at the file level, as
+   early as possible after the imports:
+   ```python
+   import pytest
+
+   pytestmark = pytest.mark.core       # for tests/foo.py under core modules
+   # OR
+   pytestmark = pytest.mark.plugins    # for tests/plugins/test_xxx.py
+   ```
+   - Use `@pytest.mark.core` for tests of non-plugin code in `folium/`
+     (features, map, utilities, vector_layers, etc.)
+   - Use `@pytest.mark.plugins` for tests of anything under `folium.plugins/`.
+   - You may *not* mark with both; you may *not* omit the category.
+
+2. **Gate markers are overlays only.**  `@pytest.mark.external_data`,
+   `@pytest.mark.render`, and `@pytest.mark.selenium` can only be added to
+   *individual test functions* (or classes) that already live in a
+   `@pytest.mark.core` or `@pytest.mark.plugins` file.  They cannot be used
+   as the sole marker on a test.  Example:
+   ```python
+   pytestmark = pytest.mark.core   # file-level category
+
+   @pytest.mark.external_data      # overlay on one test only
+   def test_something_that_uses_geodatasets():
+       ...
+   ```
+
+3. **Special directories** (`tests/selenium/`, `tests/snapshots/`) have
+   their own conventions – see the header comment in
+   [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py)
+   `pytest_collection_modifyitems`.  If you are not adding a test to one of
+   those directories, you can ignore this rule.
+
+If `tox -e marker-audit` passes, your markers are correct.  If it fails, read
+the error message carefully – it tells you which test is missing which marker.
+
 ### Running Tests
 
 ```bash
@@ -166,6 +208,10 @@ a tier matrix comment block at the top.
 ```bash
 # Default tests (core + plugins).  This is what every PR runs in CI.
 tox -e py
+
+# Static marker audit first – catch missing/incorrect markers without
+# running any tests.  Always run this after adding new test files.
+tox -e marker-audit
 
 # Default + external_data (geodatasets + network).
 tox -e py-external
