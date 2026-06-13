@@ -1,25 +1,25 @@
 """
-Release Resource Audit Tool for Folium.
+Release Resource Audit Tool for Folium (Policy-Driven Architecture).
 
-Validates that CDN resource declarations stay consistent across:
-  - Plugin / feature Python source files  (default_js / default_css)
-  - The central resource_manifest.json     (single source of truth)
-  - Documentation examples                 (docs/ directory)
-  - Inline CDN URLs inside Jinja templates
+Source of truth: plugin/feature Python source code (default_js / default_css).
+Rules: release_audit_policy.json (NOT a static resource list).
 
 Checks performed:
   1. Duplicate resource names within the same class
-  2. Version drift: the same library referenced at different versions
-     across plugins / features
-  3. URL inconsistency between source code and resource_manifest.json
-  4. Manifest completeness: every resource in source must exist in the
-     manifest, and every manifest entry must have a corresponding source
-  5. Documentation CDN references that diverge from the manifest
+  2. Version drift: same package referenced at different versions
+  3. Empty resources on classes that SHOULD have them (policy violation)
+  4. Unexpected empty resources on classes that SHOULD NOT (policy violation)
+  5. Inherited resource consistency: subclass matches parent declaration
+  6. Dynamic resource (VegaLite variants) URL consistency across variants
+  7. Documentation CDN URL consistency vs. source-derived URL set
+  8. Inline CDN URLs outside default_js/default_css (policy-checked)
 
 Usage:
-    python -m folium.release_audit              # run all checks, exit non-zero on error
+    python -m folium.release_audit              # run audit, exit non-zero on error
     python -m folium.release_audit --json        # machine-readable output
-    python -m folium.release_audit --strict      # treat warnings as errors
+    python -m folium.release_audit --strict      # promote warnings to errors (per policy)
+    python -m folium.release_audit --generate-manifest  # generate JSON from source
+    python -m folium.release_audit --generate-manifest --pretty
 """
 
 from __future__ import annotations
@@ -38,9 +38,8 @@ CDN_PATTERN = re.compile(
     r"https?://(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com|code\.jquery\.com|d3js\.org|teastman\.github\.io|www\.webglearth\.com|netdna\.bootstrapcdn\.com)/[^\s\"'<>]+"
 )
 
-PACKAGE_VERSION_PATTERN = re.compile(
-    r"@([0-9]+(?:\.[0-9]+)*)"
-)
+PACKAGE_VERSION_PATTERN = re.compile(r"@([0-9]+(?:\.[0-9]+)*)")
+PATH_SEGMENT_VERSION_PATTERN = re.compile(r"/(\d+\.\d+(?:\.\d+)?)/")
 
 FOLIUM_ROOT = Path(__file__).resolve().parent
 
@@ -52,6 +51,23 @@ class AuditFinding:
     message: str
     location: str = ""
     detail: str = ""
+
+
+@dataclass
+class ResourceEntry:
+    name: str
+    url: str
+
+
+@dataclass
+class ClassResources:
+    class_name: str
+    module: str
+    js: list[ResourceEntry]
+    css: list[ResourceEntry]
+    declared_on_class: bool
+    is_jscssmixin_subclass: bool
+    inherited_from: str | None = None
 
 
 @dataclass
@@ -89,19 +105,51 @@ class AuditResult:
         }
 
 
-def load_manifest() -> dict[str, Any]:
-    manifest_path = FOLIUM_ROOT / "resource_manifest.json"
-    with open(manifest_path, encoding="utf-8") as f:
+def load_policy() -> dict[str, Any]:
+    policy_path = FOLIUM_ROOT / "release_audit_policy.json"
+    with open(policy_path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def _collect_resources_from_class(cls: type) -> dict[str, list[tuple[str, str]]]:
-    result: dict[str, list[tuple[str, str]]] = {"js": [], "css": []}
-    for name, url in getattr(cls, "default_js", []):
-        result["js"].append((name, url))
-    for name, url in getattr(cls, "default_css", []):
-        result["css"].append((name, url))
-    return result
+def _is_jscssmixin_subclass(cls: type) -> bool:
+    from folium.elements import JSCSSMixin
+
+    return isinstance(cls, type) and issubclass(cls, JSCSSMixin)
+
+
+def _collect_resources_from_class(cls: type) -> ClassResources:
+    from folium.elements import JSCSSMixin
+
+    declared_js = []
+    declared_css = []
+
+    if "default_js" in cls.__dict__:
+        declared_js = [ResourceEntry(name=n, url=u) for n, u in getattr(cls, "default_js", [])]
+    if "default_css" in cls.__dict__:
+        declared_css = [ResourceEntry(name=n, url=u) for n, u in getattr(cls, "default_css", [])]
+
+    inherited_from = None
+    if not declared_js and not declared_css and _is_jscssmixin_subclass(cls):
+        for base in cls.__mro__[1:]:
+            if base is JSCSSMixin:
+                break
+            if "default_js" in base.__dict__ or "default_css" in base.__dict__:
+                inherited_from = base.__name__
+                break
+
+    js = [ResourceEntry(name=n, url=u) for n, u in getattr(cls, "default_js", [])]
+    css = [ResourceEntry(name=n, url=u) for n, u in getattr(cls, "default_css", [])]
+    declared_on_class = "default_js" in cls.__dict__ or "default_css" in cls.__dict__
+
+    return ClassResources(
+        class_name=cls.__name__,
+        module=cls.__module__,
+        js=js,
+        css=css,
+        declared_on_class=declared_on_class,
+        is_jscssmixin_subclass=_is_jscssmixin_subclass(cls),
+        inherited_from=inherited_from,
+    )
 
 
 def _get_plugin_classes() -> dict[str, type]:
@@ -116,31 +164,31 @@ def _get_plugin_classes() -> dict[str, type]:
 
 
 def _get_feature_classes() -> dict[str, type]:
-    from folium import features
+    from folium import features as features_pkg
 
-    feature_names = [
-        "RegularPolygonMarker",
-        "Vega",
-        "VegaLite",
-        "TopoJson",
-        "Choropleth",
-    ]
+    target_names = ["RegularPolygonMarker", "Vega", "VegaLite", "TopoJson", "Choropleth"]
     result = {}
-    for name in feature_names:
-        obj = getattr(features, name, None)
+    for name in target_names:
+        obj = getattr(features_pkg, name, None)
         if obj is not None and isinstance(obj, type):
             result[name] = obj
     return result
 
 
+def _get_map_class() -> type:
+    from folium.folium import Map
+
+    return Map
+
+
 def _extract_package_from_url(url: str) -> str | None:
     for pattern in [
-        re.compile(r"cdn\.jsdelivr\.net/npm/([^/@]+)"),
         re.compile(r"cdn\.jsdelivr\.net/npm/@[^/]+/([^/@]+)"),
+        re.compile(r"cdn\.jsdelivr\.net/npm/([^/@]+)"),
         re.compile(r"cdn\.jsdelivr\.net/gh/([^/]+/[^/@]+)"),
         re.compile(r"cdnjs\.cloudflare\.com/ajax/libs/([^/]+)"),
-        re.compile(r"unpkg\.com/([^/@]+)"),
         re.compile(r"unpkg\.com/@[^/]+/([^/@]+)"),
+        re.compile(r"unpkg\.com/([^/@]+)"),
     ]:
         m = pattern.search(url)
         if m:
@@ -152,37 +200,85 @@ def _extract_version_from_url(url: str) -> str | None:
     m = PACKAGE_VERSION_PATTERN.search(url)
     if m:
         return m.group(1)
-    m2 = re.search(r"/(\d+\.\d+(?:\.\d+)?)/", url)
+    m2 = PATH_SEGMENT_VERSION_PATTERN.search(url)
     if m2:
         return m2.group(1)
     return None
 
 
-def check_duplicate_names(result: AuditResult, resources: dict[str, list[tuple[str, str]]], class_name: str):
-    for kind in ("js", "css"):
-        names = [name for name, _ in resources.get(kind, [])]
-        seen: dict[str, int] = {}
-        for name in names:
-            seen[name] = seen.get(name, 0) + 1
-        for name, count in seen.items():
+def _is_no_resources_class(policy: dict[str, Any], class_name: str) -> tuple[bool, dict | None]:
+    for entry in policy.get("classes", {}).get("no_resources_expected", []):
+        if entry.get("class_name") == class_name:
+            return True, entry
+    return False, None
+
+
+def _is_inheritance_class(policy: dict[str, Any], class_name: str) -> tuple[bool, dict | None]:
+    for entry in policy.get("classes", {}).get("inherit_resources_from", []):
+        if entry.get("class_name") == class_name:
+            return True, entry
+    return False, None
+
+
+def _is_dynamic_resource_class(policy: dict[str, Any], class_name: str) -> tuple[bool, dict | None]:
+    for entry in policy.get("classes", {}).get("dynamic_resource_classes", []):
+        if entry.get("class_name") == class_name:
+            return True, entry
+    return False, None
+
+
+def _is_ignored_inline_cdn(policy: dict[str, Any], file_path: str, url: str) -> bool:
+    for entry in policy.get("classes", {}).get("ignore_inline_cdn_locations", []):
+        if entry.get("file") in file_path and entry.get("url_pattern") == url:
+            return True
+    return False
+
+
+def _is_strict_promotable(policy: dict[str, Any], category: str) -> bool:
+    promote_list = policy.get("strict", {}).get("promote_warnings_to_errors", [])
+    never_list = policy.get("strict", {}).get("never_promote", [])
+    if category in never_list:
+        return False
+    return category in promote_list
+
+
+def check_duplicate_names(result: AuditResult, resources: ClassResources):
+    for kind_name, resource_list in [("JS", resources.js), ("CSS", resources.css)]:
+        names: dict[str, int] = {}
+        for r in resource_list:
+            names[r.name] = names.get(r.name, 0) + 1
+        for name, count in names.items():
             if count > 1:
                 result.add_error(
                     "duplicate_name",
-                    f"Duplicate {kind} resource name '{name}' in {class_name}",
-                    location=class_name,
-                    detail=f"appears {count} times in default_{kind}",
+                    f"Duplicate {kind_name} resource name '{name}' in {resources.class_name}",
+                    location=resources.class_name,
+                    detail=f"appears {count} times in default_{kind_name.lower()}",
                 )
 
 
-def check_version_drift(result: AuditResult, all_resources: dict[str, dict[str, list[tuple[str, str]]]]):
+def check_version_drift(result: AuditResult, all_resources: dict[str, ClassResources], policy: dict[str, Any]):
+    if not policy.get("version_drift", {}).get("enabled", True):
+        return
+
     package_versions: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
-    for class_name, resources in all_resources.items():
-        for kind in ("js", "css"):
-            for name, url in resources.get(kind, []):
-                pkg = _extract_package_from_url(url)
-                ver = _extract_version_from_url(url)
-                if pkg and ver:
-                    package_versions[pkg][ver].append(f"{class_name}.{kind}.{name}")
+    unversioned_packages: dict[str, list[str]] = defaultdict(list)
+
+    allowed_multi = set(policy.get("version_drift", {}).get("allowed_multi_version_packages", []))
+    allow_unversioned = policy.get("version_drift", {}).get("allow_unversioned_packages", True)
+    unversioned_warn = policy.get("version_drift", {}).get("unversioned_warning", True)
+
+    for class_name, cr in all_resources.items():
+        for kind_name, resource_list in [("js", cr.js), ("css", cr.css)]:
+            for r in resource_list:
+                pkg = _extract_package_from_url(r.url)
+                ver = _extract_version_from_url(r.url)
+                if pkg:
+                    if ver:
+                        if pkg not in allowed_multi:
+                            package_versions[pkg][ver].append(f"{class_name}.{kind_name}.{r.name}")
+                    else:
+                        unversioned_packages[pkg].append(f"{class_name}.{kind_name}.{r.name}")
 
     for pkg, versions in package_versions.items():
         if len(versions) > 1:
@@ -193,159 +289,204 @@ def check_version_drift(result: AuditResult, all_resources: dict[str, dict[str, 
                 detail=ver_list,
             )
 
-
-def check_manifest_consistency(result: AuditResult, manifest: dict[str, Any], class_name: str, resources: dict[str, list[tuple[str, str]]], manifest_section: str):
-    if manifest_section == "map_defaults":
-        manifest_js = manifest.get("map_defaults", {}).get("js", [])
-        manifest_css = manifest.get("map_defaults", {}).get("css", [])
-    elif manifest_section == "features":
-        entry = manifest.get("features", {}).get(class_name, {})
-        if not entry:
-            result.add_error(
-                "manifest_missing",
-                f"Feature class '{class_name}' not found in manifest",
-                location=class_name,
-            )
-            return
-        manifest_js = entry.get("js", [])
-        manifest_css = entry.get("css", [])
-    elif manifest_section == "plugins":
-        entry = manifest.get("plugins", {}).get(class_name, {})
-        if not entry:
-            result.add_error(
-                "manifest_missing",
-                f"Plugin class '{class_name}' not found in manifest",
-                location=class_name,
-            )
-            return
-        if entry.get("js_dynamic"):
-            return
-        manifest_js = entry.get("js", [])
-        manifest_css = entry.get("css", [])
-    else:
-        return
-
-    manifest_js_map = {item["name"]: item["url"] for item in manifest_js}
-    manifest_css_map = {item["name"]: item["url"] for item in manifest_css}
-
-    source_js_map = {name: url for name, url in resources.get("js", [])}
-    source_css_map = {name: url for name, url in resources.get("css", [])}
-
-    for name, url in source_js_map.items():
-        if name not in manifest_js_map:
-            result.add_error(
-                "manifest_missing",
-                f"JS resource '{name}' in {class_name} not in manifest",
-                location=class_name,
-                detail=f"URL: {url}",
-            )
-        elif manifest_js_map[name] != url:
-            result.add_error(
-                "url_mismatch",
-                f"JS resource '{name}' URL mismatch in {class_name}",
-                location=class_name,
-                detail=f"source: {url}\nmanifest: {manifest_js_map[name]}",
-            )
-
-    for name, url in source_css_map.items():
-        if name not in manifest_css_map:
-            result.add_error(
-                "manifest_missing",
-                f"CSS resource '{name}' in {class_name} not in manifest",
-                location=class_name,
-                detail=f"URL: {url}",
-            )
-        elif manifest_css_map[name] != url:
-            result.add_error(
-                "url_mismatch",
-                f"CSS resource '{name}' URL mismatch in {class_name}",
-                location=class_name,
-                detail=f"source: {url}\nmanifest: {manifest_css_map[name]}",
-            )
-
-    for name in manifest_js_map:
-        if name not in source_js_map:
+    if unversioned_warn and not allow_unversioned:
+        for pkg, locs in unversioned_packages.items():
             result.add_warning(
-                "manifest_orphan",
-                f"JS resource '{name}' in manifest but not in {class_name} source",
-                location=class_name,
+                "unversioned_package",
+                f"Package '{pkg}' referenced without version number",
+                detail=f"used by {', '.join(locs)}",
             )
 
-    for name in manifest_css_map:
-        if name not in source_css_map:
+
+def check_policy_compliance(result: AuditResult, all_resources: dict[str, ClassResources], policy: dict[str, Any]):
+    for class_name, cr in all_resources.items():
+        has_resources = len(cr.js) > 0 or len(cr.css) > 0
+        is_no_res, no_res_entry = _is_no_resources_class(policy, class_name)
+        is_inherit, inherit_entry = _is_inheritance_class(policy, class_name)
+        is_dynamic, dynamic_entry = _is_dynamic_resource_class(policy, class_name)
+
+        if is_no_res and has_resources:
             result.add_warning(
-                "manifest_orphan",
-                f"CSS resource '{name}' in manifest but not in {class_name} source",
+                "policy_violation",
+                f"Class '{class_name}' marked as no_resources_expected but has resources",
                 location=class_name,
+                detail=f"policy reason: {no_res_entry.get('reason', 'N/A')}",
             )
 
-
-def check_docs_consistency(result: AuditResult, manifest: dict[str, Any]):
-    docs_dir = FOLIUM_ROOT.parent / "docs"
-    if not docs_dir.exists():
-        return
-
-    manifest_urls: set[str] = set()
-    for section_key in ("map_defaults",):
-        for kind in ("js", "css"):
-            for item in manifest.get(section_key, {}).get(kind, []):
-                manifest_urls.add(item["url"])
-    for section_key in ("features", "plugins"):
-        for class_name, entry in manifest.get(section_key, {}).items():
-            for kind in ("js", "css"):
-                for item in entry.get(kind, []):
-                    manifest_urls.add(item["url"])
-
-    doc_files = list(docs_dir.rglob("*.md")) + list(docs_dir.rglob("*.rst"))
-    for doc_file in doc_files:
-        content = doc_file.read_text(encoding="utf-8", errors="ignore")
-        doc_urls = CDN_PATTERN.findall(content)
-        for url in doc_urls:
-            if url not in manifest_urls:
+        if not is_no_res and not is_dynamic and not has_resources:
+            if cr.is_jscssmixin_subclass:
                 result.add_warning(
-                    "docs_url_not_in_manifest",
-                    f"CDN URL in docs not found in manifest",
-                    location=str(doc_file.relative_to(FOLIUM_ROOT.parent)),
-                    detail=url,
+                    "policy_violation",
+                    f"JSCSSMixin subclass '{class_name}' has empty default_js/default_css but not in no_resources_expected policy",
+                    location=class_name,
+                )
+
+        if is_inherit and cr.inherited_from:
+            expected_parent = inherit_entry.get("parent_class")
+            if expected_parent and cr.inherited_from != expected_parent:
+                result.add_warning(
+                    "inheritance_mismatch",
+                    f"Class '{class_name}' inherits from '{cr.inherited_from}' but policy says '{expected_parent}'",
+                    location=class_name,
                 )
 
 
-def check_inline_cdn_urls(result: AuditResult):
+def check_inheritance_consistency(result: AuditResult, all_resources: dict[str, ClassResources], policy: dict[str, Any]):
+    for entry in policy.get("classes", {}).get("inherit_resources_from", []):
+        class_name = entry.get("class_name")
+        parent_name = entry.get("parent_class")
+
+        if class_name not in all_resources or parent_name not in all_resources:
+            continue
+
+        child = all_resources[class_name]
+        parent = all_resources[parent_name]
+
+        if child.declared_on_class:
+            child_js_urls = {(r.name, r.url) for r in child.js}
+            parent_js_urls = {(r.name, r.url) for r in parent.js}
+            child_css_urls = {(r.name, r.url) for r in child.css}
+            parent_css_urls = {(r.name, r.url) for r in parent.css}
+
+            if child_js_urls != parent_js_urls:
+                diff = child_js_urls.symmetric_difference(parent_js_urls)
+                result.add_warning(
+                    "inheritance_resource_mismatch",
+                    f"'{class_name}' declares own JS resources that differ from parent '{parent_name}'",
+                    location=class_name,
+                    detail=f"differences: {diff}",
+                )
+
+            if child_css_urls != parent_css_urls:
+                diff = child_css_urls.symmetric_difference(parent_css_urls)
+                result.add_warning(
+                    "inheritance_resource_mismatch",
+                    f"'{class_name}' declares own CSS resources that differ from parent '{parent_name}'",
+                    location=class_name,
+                    detail=f"differences: {diff}",
+                )
+
+
+def _collect_all_urls(all_resources: dict[str, ClassResources]) -> set[str]:
+    urls: set[str] = set()
+    for cr in all_resources.values():
+        for r in cr.js + cr.css:
+            urls.add(r.url)
+    return urls
+
+
+def check_docs_consistency(result: AuditResult, all_resources: dict[str, ClassResources], policy: dict[str, Any]):
+    import inspect
+
+    docs_config = policy.get("docs", {})
+    if not docs_config.get("check_docs", True):
+        return
+
+    source_urls = _collect_all_urls(all_resources)
+
+    from folium import features
+
+    try:
+        source = inspect.getsource(features)
+        for url in CDN_PATTERN.findall(source):
+            source_urls.add(url)
+    except Exception:
+        pass
+
+    docs_root = FOLIUM_ROOT.parent / docs_config.get("docs_root", "docs")
+    if not docs_root.exists():
+        return
+
+    allowed_patterns = [re.compile(p) for p in docs_config.get("allowed_extra_url_patterns", [])]
+    allowed_exact = set(docs_config.get("allowed_extra_urls_exact", []))
+    ignore_paths = set(docs_config.get("ignore_paths", []))
+
+    file_patterns = docs_config.get("file_patterns", ["*.md", "*.rst"])
+    doc_files: list[Path] = []
+    for pattern in file_patterns:
+        doc_files.extend(docs_root.rglob(pattern))
+
+    for doc_file in doc_files:
+        rel_doc = str(doc_file.relative_to(FOLIUM_ROOT.parent))
+        if any(ignore in rel_doc for ignore in ignore_paths):
+            continue
+
+        content = doc_file.read_text(encoding="utf-8", errors="ignore")
+        doc_urls = CDN_PATTERN.findall(content)
+        for url in doc_urls:
+            if url in source_urls:
+                continue
+            if url in allowed_exact:
+                result.add_warning(
+                    "docs_allowed_extra_url",
+                    f"CDN URL in docs is in allowed_exact list",
+                    location=rel_doc,
+                    detail=url,
+                )
+                continue
+            if any(p.search(url) for p in allowed_patterns):
+                result.add_warning(
+                    "docs_allowed_extra_url",
+                    f"CDN URL in docs matches allowed_extra_url_patterns",
+                    location=rel_doc,
+                    detail=url,
+                )
+                continue
+            result.add_warning(
+                "docs_url_not_in_source",
+                f"CDN URL in docs not found in source code resources",
+                location=rel_doc,
+                detail=url,
+            )
+
+
+def check_inline_cdn_urls(result: AuditResult, policy: dict[str, Any]):
     src_dir = FOLIUM_ROOT
     py_files = list(src_dir.rglob("*.py"))
 
     for py_file in py_files:
-        rel = py_file.relative_to(FOLIUM_ROOT)
+        rel = str(py_file.relative_to(FOLIUM_ROOT))
         content = py_file.read_text(encoding="utf-8", errors="ignore")
         try:
-            tree = ast.parse(content, filename=str(rel))
+            tree = ast.parse(content, filename=rel)
         except SyntaxError:
             continue
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
+
+            is_resource_decl = False
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id in (
-                    "default_js",
-                    "default_css",
-                    "_default_js",
-                    "_default_css",
-                ):
-                    continue
+                if isinstance(target, ast.Name) and target.id in ("default_js", "default_css"):
+                    is_resource_decl = True
+                    break
+            if is_resource_decl:
+                continue
 
             if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 url = node.value.value
                 if CDN_PATTERN.match(url):
+                    if _is_ignored_inline_cdn(policy, rel, url):
+                        continue
                     result.add_warning(
                         "inline_cdn_url",
                         f"CDN URL found outside default_js/default_css",
-                        location=str(rel),
+                        location=rel,
                         detail=url[:120],
                     )
 
 
-def check_features_dynamic_urls(result: AuditResult):
+def check_vegalite_variants(result: AuditResult, policy: dict[str, Any]):
+    dynamic_cfg = policy.get("classes", {}).get("dynamic_resource_classes", [])
+    vegalite_cfg = None
+    for cfg in dynamic_cfg:
+        if cfg.get("class_name") == "VegaLite":
+            vegalite_cfg = cfg
+            break
+    if not vegalite_cfg:
+        return
+
     features_path = FOLIUM_ROOT / "features.py"
     if not features_path.exists():
         return
@@ -360,7 +501,7 @@ def check_features_dynamic_urls(result: AuditResult):
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
             continue
-        if not node.name.startswith("_embed_"):
+        if not node.name.startswith(vegalite_cfg.get("method_prefix", "_embed_vegalite_v")):
             continue
         for child in ast.walk(node):
             if not isinstance(child, ast.Constant):
@@ -370,75 +511,110 @@ def check_features_dynamic_urls(result: AuditResult):
             if CDN_PATTERN.match(child.value):
                 method_url_map[node.name].append(child.value)
 
-    manifest_variants = load_manifest().get("features", {}).get("VegaLite", {}).get("variants", {})
-    for variant_name, variant_data in manifest_variants.items():
-        variant_urls = set()
-        for item in variant_data.get("js", []):
-            variant_urls.add(item["url"])
-        for item in variant_data.get("css", []):
-            variant_urls.add(item["url"])
+    variants = vegalite_cfg.get("variants", [])
+    for variant in variants:
+        method_name = f"{vegalite_cfg.get('method_prefix', '_embed_vegalite_v')}{variant}"
+        if method_name not in method_url_map:
+            result.add_error(
+                "vegalite_variant_missing",
+                f"VegaLite variant method '{method_name}' not found in features.py",
+                location=f"features.py::{method_name}",
+            )
+            continue
 
-        method_name = f"_embed_vegalite_{variant_name}"
-        if method_name in method_url_map:
-            method_urls = set(method_url_map[method_name])
-            missing = method_urls - variant_urls
-            if missing:
-                result.add_error(
-                    "url_mismatch",
-                    f"VegaLite variant '{variant_name}': URLs in source not in manifest",
-                    location=f"features.py::{method_name}",
-                    detail=f"missing from manifest: {missing}",
-                )
-            extra = variant_urls - method_urls
-            if extra:
-                result.add_warning(
-                    "manifest_orphan",
-                    f"VegaLite variant '{variant_name}': URLs in manifest not in source",
-                    location=f"features.py::{method_name}",
-                    detail=f"extra in manifest: {extra}",
-                )
+        urls = method_url_map[method_name]
+        if not urls:
+            result.add_warning(
+                "vegalite_variant_empty",
+                f"VegaLite variant '{variant}' has no CDN URLs in its embed method",
+                location=f"features.py::{method_name}",
+            )
+
+
+def generate_manifest(all_resources: dict[str, ClassResources], pretty: bool = False) -> str:
+    manifest: dict[str, Any] = {
+        "_generated": "Generated from folium.release_audit --generate-manifest. Source of truth is default_js/default_css in source code.",
+        "_generated_at": "",
+        "map_defaults": {"js": [], "css": []},
+        "features": {},
+        "plugins": {},
+    }
+
+    import datetime
+
+    manifest["_generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    for class_name, cr in all_resources.items():
+        js_list = [{"name": r.name, "url": r.url} for r in cr.js]
+        css_list = [{"name": r.name, "url": r.url} for r in cr.css]
+        entry = {"js": js_list, "css": css_list}
+        if cr.inherited_from:
+            entry["inherited_from"] = cr.inherited_from
+        if not cr.declared_on_class:
+            entry["inherited"] = True
+        entry["module"] = cr.module
+
+        if class_name == "Map":
+            manifest["map_defaults"]["js"] = js_list
+            manifest["map_defaults"]["css"] = css_list
+            manifest["map_defaults"]["module"] = cr.module
+        elif cr.module.startswith("folium.features"):
+            manifest["features"][class_name] = entry
+        elif cr.module.startswith("folium.plugins"):
+            manifest["plugins"][class_name] = entry
+
+    return json.dumps(manifest, indent=2 if pretty else None, sort_keys=True)
+
+
+def collect_all_resources() -> dict[str, ClassResources]:
+    result: dict[str, ClassResources] = {}
+
+    map_cls = _get_map_class()
+    result["Map"] = _collect_resources_from_class(map_cls)
+
+    for name, cls in _get_feature_classes().items():
+        result[name] = _collect_resources_from_class(cls)
+
+    for name, cls in _get_plugin_classes().items():
+        result[name] = _collect_resources_from_class(cls)
+
+    return result
+
+
+def apply_strict_policy(result: AuditResult, policy: dict[str, Any]):
+    new_errors: list[AuditFinding] = []
+    new_warnings: list[AuditFinding] = []
+
+    for f in result.warnings:
+        if _is_strict_promotable(policy, f.category):
+            new_errors.append(AuditFinding("error", f.category, f.message, f.location, f.detail))
+        else:
+            new_warnings.append(f)
+
+    result.errors.extend(new_errors)
+    result.warnings = new_warnings
 
 
 def run_audit(strict: bool = False) -> AuditResult:
     result = AuditResult()
+    policy = load_policy()
+    all_resources = collect_all_resources()
 
-    manifest = load_manifest()
-
-    from folium.folium import Map
-
-    map_resources = _collect_resources_from_class(Map)
-    check_duplicate_names(result, map_resources, "Map")
-    check_manifest_consistency(result, manifest, "Map", map_resources, "map_defaults")
-
-    feature_classes = _get_feature_classes()
-    all_resources: dict[str, dict[str, list[tuple[str, str]]]] = {}
-    all_resources["Map"] = map_resources
-
-    for class_name, cls in feature_classes.items():
-        if class_name == "VegaLite":
+    for class_name, resources in all_resources.items():
+        is_dynamic, _ = _is_dynamic_resource_class(policy, class_name)
+        if is_dynamic:
             continue
-        resources = _collect_resources_from_class(cls)
-        all_resources[class_name] = resources
-        check_duplicate_names(result, resources, class_name)
-        check_manifest_consistency(result, manifest, class_name, resources, "features")
+        check_duplicate_names(result, resources)
 
-    check_features_dynamic_urls(result)
-
-    plugin_classes = _get_plugin_classes()
-    for class_name, cls in plugin_classes.items():
-        resources = _collect_resources_from_class(cls)
-        all_resources[class_name] = resources
-        check_duplicate_names(result, resources, class_name)
-        check_manifest_consistency(result, manifest, class_name, resources, "plugins")
-
-    check_version_drift(result, all_resources)
-    check_docs_consistency(result, manifest)
-    check_inline_cdn_urls(result)
+    check_version_drift(result, all_resources, policy)
+    check_policy_compliance(result, all_resources, policy)
+    check_inheritance_consistency(result, all_resources, policy)
+    check_vegalite_variants(result, policy)
+    check_docs_consistency(result, all_resources, policy)
+    check_inline_cdn_urls(result, policy)
 
     if strict:
-        for w in result.warnings:
-            result.errors.append(w)
-        result.warnings.clear()
+        apply_strict_policy(result, policy)
 
     return result
 
@@ -462,8 +638,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Folium Release Resource Audit")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
-    parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
+    parser.add_argument("--strict", action="store_true", help="Promote warnings to errors per policy")
+    parser.add_argument("--generate-manifest", action="store_true", help="Generate JSON manifest from source code")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print generated manifest")
     args = parser.parse_args()
+
+    if args.generate_manifest:
+        all_res = collect_all_resources()
+        print(generate_manifest(all_res, pretty=args.pretty))
+        sys.exit(0)
 
     result = run_audit(strict=args.strict)
 

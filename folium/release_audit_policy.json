@@ -1,0 +1,145 @@
+{
+  "_comment": "Folium Release Resource Audit Policy. NOT a static resource list — rules are applied to resources dynamically extracted from plugin/feature source code (default_js/default_css) as the single source of truth.",
+
+  "policy_version": "1.0",
+
+  "classes": {
+    "_comment": "Per-class audit policies. All classes listed in folium.plugins.__all__ and features module are scanned automatically; these are exceptions to defaults.",
+
+    "no_resources_expected": [
+      {
+        "class_name": "FloatImage",
+        "module": "folium.plugins.float_image",
+        "reason": "Inherits from MacroElement only; no CDN resources, uses inline image URLs"
+      },
+      {
+        "class_name": "ScrollZoomToggler",
+        "module": "folium.plugins.scroll_zoom_toggler",
+        "reason": "Inherits from MacroElement only; CDN URL for icon is inside Jinja template"
+      },
+      {
+        "class_name": "WebGLEarthMarker",
+        "module": "folium.plugins.webgl_earth",
+        "reason": "Inherits from MacroElement only; no own CDN resources"
+      },
+      {
+        "class_name": "WebGLEarthTileLayer",
+        "module": "folium.plugins.webgl_earth",
+        "reason": "Inherits from MacroElement only; no own CDN resources"
+      },
+      {
+        "class_name": "WebGLEarthRealtime",
+        "module": "folium.plugins.webgl_earth",
+        "reason": "Inherits from JSCSSMixin but has empty default_js/default_css intentionally"
+      },
+      {
+        "class_name": "VegaLite",
+        "module": "folium.features",
+        "reason": "Dynamic resource selection based on schema version at render time; checked via dedicated VegaLite variant check"
+      },
+      {
+        "class_name": "Choropleth",
+        "module": "folium.features",
+        "reason": "Inherits from FeatureGroup; no own CDN resources. TopoJSON is handled by TopoJson class"
+      }
+    ],
+
+    "inherit_resources_from": [
+      {
+        "class_name": "FastMarkerCluster",
+        "parent_class": "MarkerCluster",
+        "module": "folium.plugins.fast_marker_cluster",
+        "reason": "Subclass inherits default_js/default_css from MarkerCluster; not a separate resource declaration"
+      },
+      {
+        "class_name": "PolyLineFromEncoded",
+        "parent_class": "_BaseFromEncoded",
+        "module": "folium.plugins.encoded",
+        "reason": "Subclass inherits default_js from _BaseFromEncoded; not a separate resource declaration"
+      },
+      {
+        "class_name": "PolygonFromEncoded",
+        "parent_class": "_BaseFromEncoded",
+        "module": "folium.plugins.encoded",
+        "reason": "Subclass inherits default_js from _BaseFromEncoded; not a separate resource declaration"
+      },
+      {
+        "class_name": "Timeline",
+        "parent_class": "GeoJson",
+        "module": "folium.plugins.timeline",
+        "reason": "Subclass has its own default_js that overrides any parent; checked as standalone"
+      }
+    ],
+
+    "dynamic_resource_classes": [
+      {
+        "class_name": "VegaLite",
+        "module": "folium.features",
+        "method_prefix": "_embed_vegalite_v",
+        "variants": ["1", "2", "3", "4", "5", "6"],
+        "reason": "VegaLite embeds different CDN URLs per schema version variant"
+      }
+    ],
+
+    "ignore_inline_cdn_locations": [
+      {
+        "file": "folium/plugins/scroll_zoom_toggler.py",
+        "url_pattern": "https://cdnjs.cloudflare.com/ajax/libs/ionicons/2.0.1/png/512/arrow-move.png",
+        "reason": "CDN URL for icon is inside template, not default_js/default_css; belongs to ScrollZoomToggler plugin"
+      }
+    ]
+  },
+
+  "docs": {
+    "_comment": "Documentation CDN URL checking policy.",
+
+    "check_docs": true,
+
+    "docs_root": "docs",
+
+    "file_patterns": ["*.md", "*.rst"],
+
+    "ignore_paths": [
+      "docs/changelog.md"
+    ],
+
+    "allowed_extra_url_patterns": [
+      "https://cdn.jsdelivr.net/npm/leaflet@",
+      "https://unpkg.com/leaflet@",
+      "https://cdnjs.cloudflare.com/ajax/libs/leaflet/",
+      "https://cdn.jsdelivr.net/npm/dayjs@",
+      "https://unpkg.com/dayjs@"
+    ],
+
+    "allowed_extra_urls_exact": [],
+
+    "_reason": "Docs may show users how to override Leaflet URL or use custom libraries (dayjs) in examples — these are intentional demos, not version drift. But library-specific version mismatches (e.g. leaflet-fullscreen@1.6.0 vs plugin@3.0.0) should be flagged."
+  },
+
+  "strict": {
+    "_comment": "Which warning categories are promoted to errors in --strict mode (used for release gate).",
+
+    "promote_warnings_to_errors": [
+      "version_drift",
+      "inline_cdn_url",
+      "docs_url_not_in_source"
+    ],
+
+    "never_promote": [
+      "docs_allowed_extra_url",
+      "vegalite_variant_empty"
+    ]
+  },
+
+  "version_drift": {
+    "_comment": "Controls cross-class version consistency checking.",
+
+    "enabled": true,
+
+    "allowed_multi_version_packages": [],
+
+    "allow_unversioned_packages": true,
+
+    "unversioned_warning": true
+  }
+}
