@@ -31,8 +31,10 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from smoke_checker import (
+    AuditSummary,
     ExampleSpec,
     SmokeResult,
+    build_audit_summary,
     build_example_registry,
     filter_examples,
     run_example,
@@ -57,6 +59,8 @@ def test_smoke_example_offline(
     smoke_html_output,
 ) -> None:
     """Run offline smoke examples (default, fast, no network)."""
+    if spec.skip and spec.skip_reason:
+        pytest.skip(spec.skip_reason)
     result: SmokeResult = run_example(
         spec,
         html_output_dir=smoke_html_output,
@@ -93,6 +97,8 @@ def test_smoke_example_network(
 ) -> None:
     """Run smoke examples that require network access (opt-in only)."""
     assert spec.requires_network
+    if spec.skip and spec.skip_reason:
+        pytest.skip(spec.skip_reason)
     result: SmokeResult = run_example(
         spec,
         html_output_dir=smoke_html_output,
@@ -124,3 +130,25 @@ def test_smoke_registry_not_empty() -> None:
         assert spec.requires_network, (
             f"Network example '{spec.name}' should require network."
         )
+
+
+@pytest.mark.smoke
+def test_smoke_coverage_audit() -> None:
+    """Coverage audit — ensures every code-bearing doc/example file is either
+    registered for testing or explicitly skipped with a reason.
+
+    Also prints the full audit report when run with ``-v -s``.
+    """
+    summary: AuditSummary = build_audit_summary(_ALL_SPECS)
+
+    unregistered_with_code = [
+        e for e in summary.entries if e.has_code and not e.registered
+    ]
+    assert not unregistered_with_code, (
+        "Found source files with code blocks that are NOT registered in the "
+        "smoke test registry and not explicitly skipped. Add them to "
+        "POLICY_MANIFEST in tests/smoke_checker.py.  Unregistered files:\n  - "
+        + "\n  - ".join(e.source for e in unregistered_with_code)
+    )
+
+    print("\n" + summary.format_report())
