@@ -40,12 +40,12 @@ jobs:
     - name: Run core and plugin tests
       run: |
         coverage run -p -m pytest tests -vv \
-          -m "core or plugins" \
+          -m "core or plugins or smoke" \
           --ignore=tests/selenium \
           --ignore=tests/snapshots
         echo "=== Test Selection Summary ==="
         python -m pytest tests --collect-only -q \
-          -m "core or plugins" \
+          -m "core or plugins or smoke" \
           --ignore=tests/selenium \
           --ignore=tests/snapshots 2>&1 | tail -5
 

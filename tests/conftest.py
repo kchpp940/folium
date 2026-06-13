@@ -4,10 +4,12 @@ Pytest configuration for folium tests.
 Defines test markers, CLI options, and auto-skip logic to separate:
 - core: fast, stable unit tests (run by default)
 - plugins: plugin tests (run by default)
-- audit: release resource consistency + public API boundary audit (run by default)
+- audit: release resource consistency audit (run by default)
+- smoke: lightweight example validation from docs/examples/notebooks (run by default)
 - external_data: tests requiring geodatasets or network resources
 - render: slow PNG rendering tests with pixelmatch
 - selenium: browser automation tests
+- smoke_network: smoke tests requiring network access or remote resources
 """
 
 import pytest
@@ -48,6 +50,17 @@ def pytest_configure(config):
         "selenium: Browser automation tests requiring Selenium webdriver. "
         "Requires --run-selenium flag.",
     )
+    config.addinivalue_line(
+        "markers",
+        "smoke: Lightweight example validation from docs, examples, and notebooks. "
+        "Runs offline, generates minimal HTML, checks for template errors. "
+        "These run by default.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "smoke_network: Smoke tests requiring network access, remote tile services, "
+        "or external data URLs. Requires --run-smoke-network flag.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +98,18 @@ def pytest_addoption(parser):
         default=False,
         help="Run all tests including external_data, render, and selenium.",
     )
+    parser.addoption(
+        "--run-smoke-network",
+        action="store_true",
+        default=False,
+        help="Run smoke tests that require network access or remote resources.",
+    )
+    parser.addoption(
+        "--smoke-html-output",
+        type=str,
+        default=None,
+        help="Directory to save generated HTML from smoke tests for inspection.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +123,7 @@ def pytest_runtest_setup(item):
     run_external_data = run_all or item.config.getoption("--run-external-data")
     run_render = run_all or item.config.getoption("--run-render")
     run_selenium = run_all or item.config.getoption("--run-selenium")
+    run_smoke_network = run_all or item.config.getoption("--run-smoke-network")
 
     if "audit" in item.keywords and not run_audit:
         pytest.skip("Need --run-audit or --run-all to run this test")
@@ -111,6 +137,15 @@ def pytest_runtest_setup(item):
 
     if "selenium" in item.keywords and not run_selenium:
         pytest.skip("Need --run-selenium or --run-all to run this test")
+
+    if "smoke_network" in item.keywords and not run_smoke_network:
+        pytest.skip("Need --run-smoke-network or --run-all to run this test")
+
+
+@pytest.fixture(scope="session")
+def smoke_html_output(request):
+    """Return the directory path for saving smoke test HTML output, or None."""
+    return request.config.getoption("--smoke-html-output")
 
 
 # ---------------------------------------------------------------------------
