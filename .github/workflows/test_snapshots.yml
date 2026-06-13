@@ -1,18 +1,10 @@
 name: Run Snapshot Tests
 
-# Tier: render (PNG pixelmatch) + selenium (browser driver) + external_data (network in modules)
-# See tests/conftest.py and .github/workflows/test_code.yml for the full matrix.
-#
-# Triggered on: schedule (daily), push to main, PRs labeled `run-render`.
-# Needs: pixelmatch + pillow + selenium + Chrome webdriver.
-# Renders each module in tests/snapshots/modules/*.py to PNG and diffs against
-# the golden image in tests/snapshots/screenshots/*.png.
-
 on:
   schedule:
     - cron: "0 13 * * *"
   pull_request:
-    types: [ labeled, opened, synchronize, reopened ]
+    types: [labeled, opened, synchronize, reopened]
   push:
     branches:
       - main
@@ -40,26 +32,20 @@ jobs:
           --file requirements-dev.txt
 
     - name: Install pytest plugins and pixelmatch
-      run: |
-        pip install pixelmatch pytest-github-actions-annotate-failures pytest-rerunfailures
+      run: pip install pixelmatch pytest-github-actions-annotate-failures pytest-rerunfailures
 
     - name: Install folium from source
-      run: |
-        python -m pip install -e . --no-deps --force-reinstall
+      run: python -m pip install -e . --no-deps --force-reinstall
+
+    - name: Marker audit
+      run: python -m pytest tests --collect-only -q
 
     - name: Test with pytest
       run: |
-        # Pass all three --run-* flags:
-        #   --run-render         → enable render gate (pixelmatch diff)
-        #   --run-selenium       → enable selenium gate (Chrome driver)
-        #   --run-external-data  → enable external_data gate (network in modules)
         coverage run -p -m pytest tests/snapshots -s --junit-xml=test-results.xml \
           --run-render \
           --run-selenium \
           --run-external-data
-        echo "=== Collected render-tier snapshot tests ==="
-        python -m pytest tests/snapshots --collect-only -q \
-          --run-render 2>&1 | tail -10
 
     - name: Surface failing tests
       if: always()
@@ -82,6 +68,5 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: coverage-test-snapshots
-        path: |
-          .coverage*
+        path: .coverage*
         include-hidden-files: true

@@ -20,8 +20,8 @@ Being an open source contributor doesn't just mean writing code, either. You can
 help out by writing documentation, tests, or even giving feedback about the
 project (and yes - that includes giving feedback about the contribution
 process). Some of these contributions may be the most valuable to the project as
-a whole, because you're coming to the project with fresh eyes, so you can see
-the errors and assumptions that seasoned contributors have glossed over.
+a whole, because you're coming to the project with fresh eyes, so you can see the
+errors and assumptions that seasoned contributors have glossed over.
 
 (This disclaimer was originally written by
 [Adrienne Lowe](https://github.com/adriennefriend) for a
@@ -91,159 +91,112 @@ Since we're all volunteers please help us by making your PR easy to review. That
 
 ## Test Categories and Markers
 
-Folium uses pytest markers to categorize tests by stability, speed, and dependencies.
-This allows you to run only the tests you need, and avoids failures from missing
-optional dependencies or network issues.
+Folium uses pytest markers to categorize tests.  The marker rules are
+**enforced at collection time** by the `pytest_collection_modifyitems` hook
+in [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py) – if
+you break them, `pytest` exits immediately with code 4, before any test runs.
 
-### Available Markers
+### Markers
 
-Markers are registered in both
-[pyproject.toml](file:///Users/pkcha/folium/pyproject.toml) (under
-`[tool.pytest.ini_options].markers`) and
-[tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py)
-(via `pytest_configure`).  They come in two flavours:
-
-| Marker | Type | Description | Default | Dependencies |
+| Marker | Kind | Description | Default | Dependencies |
 |--------|------|-------------|---------|--------------|
-| `core` | **category** | Fast, stable unit tests for folium core (features, map, utilities, vector_layers, …) | ✅ Runs by default | None |
-| `plugins` | **category** | Tests for `folium.plugins.*` (stable HTML-rendering tests) | ✅ Runs by default | None |
-| `external_data` | **gate** | Requires `geodatasets`, live `requests` calls, or remote APIs. Needs `--run-external-data`. | ❌ Skipped | `geodatasets`, network |
-| `render` | **gate** | Slow PNG rendering with `pixelmatch` against golden screenshots. Needs `--run-render`. | ❌ Skipped | `pixelmatch`, `pillow`, `selenium` |
-| `selenium` | **gate** | Browser automation driven by Selenium / Chrome. Needs `--run-selenium`. | ❌ Skipped | `selenium`, Chrome webdriver |
+| `core` | category | Fast unit tests for folium core (features, map, utilities, …) | ✅ runs | none |
+| `plugins` | category | Tests for `folium.plugins.*` | ✅ runs | none |
+| `external_data` | gate | Needs `geodatasets`, network, or remote APIs | ❌ skip | `geodatasets`, network |
+| `render` | gate | PNG diff with `pixelmatch` against golden screenshots | ❌ skip | `pixelmatch`, `pillow`, `selenium` |
+| `selenium` | gate | Browser automation via Selenium / Chrome | ❌ skip | `selenium`, Chrome |
 
-A **category** marker is informational: you combine it with `-m` to *select* a
-subset (e.g. `-m plugins`).  A **gate** marker is opt-in: without the matching
-`--run-*` CLI flag the test is SKIPPED, regardless of `-m`.
-
-### Skip-Reason Cheat-Sheet
-
-`pytest -ra` prints all skip reasons at the end.  Recognise these two patterns:
-
-| Reason prefix | Meaning | What to do |
-|---------------|---------|------------|
-| `external_data: pass --run-external-data or --run-all` | Opt-in gate not enabled. | Pass the flag, or ignore (intended for local dev). |
-| `render: pass --run-render or --run-all` | Same, for the render gate. | Pass the flag. |
-| `selenium: pass --run-selenium or --run-all` | Same, for the selenium gate. | Pass the flag. |
-| `… --run-<tier> passed but <dep> is not installed (pip install …)` | You explicitly asked for the tier, but the machine is missing a Python package. | Install the dependency named in the message. |
-
-The distinction matters: the first group is “you asked for a smaller set”, the
-second is “you asked for the full set but the environment is incomplete”.
-Neither means your code is broken.  If `core` / `plugins` tests fail, *that* is
-a code regression.
+- **Category** markers select a subset with `-m`.  Every test must carry
+  exactly one.
+- **Gate** markers are opt-in: without the matching `--run-*` flag the test
+  is SKIPPED.  They can only be added **on top of** a category marker.
 
 ### Writing New Tests
 
-**Every test you add MUST be marked.**  The CI marker-audit step (and the
-`pytest_collection_modifyitems` hook in [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py))
-will *hard-fail* collection (exit code 4) if any of these rules are broken:
-
-1. **Pick exactly one category marker** and apply it at the file level, as
-   early as possible after the imports:
+1. **Pick exactly one category** and set it at the file level:
    ```python
    import pytest
-
-   pytestmark = pytest.mark.core       # for tests/foo.py under core modules
+   pytestmark = pytest.mark.core       # tests/foo.py
    # OR
-   pytestmark = pytest.mark.plugins    # for tests/plugins/test_xxx.py
+   pytestmark = pytest.mark.plugins    # tests/plugins/test_xxx.py
    ```
-   - Use `@pytest.mark.core` for tests of non-plugin code in `folium/`
-     (features, map, utilities, vector_layers, etc.)
-   - Use `@pytest.mark.plugins` for tests of anything under `folium.plugins/`.
-   - You may *not* mark with both; you may *not* omit the category.
+   - `core` → tests of non-plugin code in `folium/`
+   - `plugins` → tests of anything under `folium.plugins/`
+   - You may **not** mark with both; you may **not** omit the category.
 
-2. **Gate markers are overlays only.**  `@pytest.mark.external_data`,
-   `@pytest.mark.render`, and `@pytest.mark.selenium` can only be added to
-   *individual test functions* (or classes) that already live in a
-   `@pytest.mark.core` or `@pytest.mark.plugins` file.  They cannot be used
-   as the sole marker on a test.  Example:
+2. **Gate markers are overlays only** – add them to individual functions:
    ```python
-   pytestmark = pytest.mark.core   # file-level category
+   pytestmark = pytest.mark.core
 
-   @pytest.mark.external_data      # overlay on one test only
+   @pytest.mark.external_data          # overlay on one test
    def test_something_that_uses_geodatasets():
        ...
    ```
 
 3. **Special directories** (`tests/selenium/`, `tests/snapshots/`) have
-   their own conventions – see the header comment in
-   [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py)
-   `pytest_collection_modifyitems`.  If you are not adding a test to one of
-   those directories, you can ignore this rule.
+   their own conventions – see `pytest_collection_modifyitems` in
+   [tests/conftest.py](file:///Users/pkcha/folium/tests/conftest.py).
 
-If `tox -e marker-audit` passes, your markers are correct.  If it fails, read
-the error message carefully – it tells you which test is missing which marker.
+### Marker Audit
+
+The single entry point for structural checks is:
+
+```bash
+python -m pytest tests --collect-only -q
+# or via tox:
+tox -e marker-audit
+```
+
+This runs **no test code** – it only collects items and verifies every
+test carries the right markers.  If it exits with code 4, read the error
+message to find which test is missing which marker.
+
+Every tox environment declares `depends = marker-audit`, so `tox` (without
+`-e`) always runs the audit first.  Every CI workflow also runs this exact
+same command as a "Marker audit" step before executing any tests.
 
 ### Running Tests
 
 ```bash
-# Default: run core + plugins tests (fast, stable, no network, no browser).
-# Gate-tagged tests (external_data/render/selenium) will show as SKIPPED.
+# Default: core + plugins (fast, offline, no browser).
 python -m pytest tests --ignore=tests/selenium --ignore=tests/snapshots
 
-# Also run tests that hit geodatasets or the network.
+# Also run external-data tests.
 python -m pytest tests --ignore=tests/selenium --ignore=tests/snapshots --run-external-data
 
-# Run PNG snapshot tests (needs selenium + pixelmatch + pillow + Chrome).
+# PNG snapshot tests.
 python -m pytest tests/snapshots --run-render --run-selenium --run-external-data
 
-# Run browser automation tests.
+# Browser automation tests.
 python -m pytest tests/selenium --run-selenium --run-external-data
 
-# Run EVERYTHING (all gates open).
+# Everything.
 python -m pytest tests --run-all
-
-# Selection examples using markers (-m).
-python -m pytest tests -m "core"                     # only core
-python -m pytest tests -m "plugins"                  # only plugins
-python -m pytest tests -m "core or plugins"          # default tier (same as no -m)
-python -m pytest tests -m "not external_data"        # exclude a gate
-python -m pytest tests -m "plugins and not external"  # only stable plugins
 ```
 
 ### Using Tox
 
-[tox.ini](file:///Users/pkcha/folium/tox.ini) documents every environment with
-a tier matrix comment block at the top.
-
 ```bash
-# Default tests (core + plugins).  This is what every PR runs in CI.
-tox -e py
-
-# Static marker audit first – catch missing/incorrect markers without
-# running any tests.  Always run this after adding new test files.
-tox -e marker-audit
-
-# Default + external_data (geodatasets + network).
-tox -e py-external
-
-# PNG pixelmatch snapshot tier (selenium + pixelmatch + pillow).
-tox -e py-render
-
-# Selenium browser tier.
-tox -e py-selenium
-
-# All tiers combined.
-tox -e py-all
-
-# Fastest inner-loop run (compact output, no gate-tagged tests collected).
-tox -e quick
-
-# Pre-release gate: all tiers + mypy type-checking.
-tox -e release-check
+tox -e marker-audit    # structural audit only (no tests execute)
+tox -e quick           # fastest inner loop: core + plugins, compact output
+tox -e py              # default: core + plugins
+tox -e py-external     # default + external_data
+tox -e py-render       # PNG snapshot tier
+tox -e py-selenium     # browser automation tier
+tox -e py-all          # everything
+tox -e release-check   # everything + mypy
 ```
 
 ### CI Trigger Labels
 
-For pull requests, optional tiers (render, selenium) are skipped by default to
-keep feedback fast.  Add a label to force them to run for your PR:
+| PR label | Workflow |
+|----------|----------|
+| `run-selenium` | [test_selenium.yml](file:///Users/pkcha/folium/.github/workflows/test_selenium.yml) |
+| `run-render` | [test_snapshots.yml](file:///Users/pkcha/folium/.github/workflows/test_snapshots.yml) |
 
-- `run-selenium` → triggers [test_selenium.yml](file:///Users/pkcha/folium/.github/workflows/test_selenium.yml)
-- `run-render` → triggers [test_snapshots.yml](file:///Users/pkcha/folium/.github/workflows/test_snapshots.yml)
-
-The main [test_code.yml](file:///Users/pkcha/folium/.github/workflows/test_code.yml)
-always runs `core + plugins` on every PR and push.  Its `external_data` job
-runs on push to `main` and on the daily schedule.  The full tier-to-job matrix
-is documented in the header of that file.
+[test_code.yml](file:///Users/pkcha/folium/.github/workflows/test_code.yml)
+always runs `core + plugins` on every PR and push; its `external_data` job
+runs on push to `main` and on the daily schedule.
 
 ## Plugin acceptance criteria
 
