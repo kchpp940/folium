@@ -110,18 +110,6 @@ def pytest_addoption(parser):
         default=None,
         help="Directory to save generated HTML from smoke tests for inspection.",
     )
-    parser.addoption(
-        "--smoke-audit",
-        action="store_true",
-        default=False,
-        help="Print the smoke test coverage audit summary after collection.",
-    )
-    parser.addoption(
-        "--smoke-audit-output",
-        type=str,
-        default=None,
-        help="Write the smoke test coverage audit summary to this file path.",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,42 +182,3 @@ def selenium_available():
         return True
     except ImportError:
         return False
-
-
-# ---------------------------------------------------------------------------
-# Smoke test audit report
-# ---------------------------------------------------------------------------
-
-def pytest_collection_modifyitems(config, items):
-    """Optionally print the smoke coverage audit after test collection."""
-    if not (
-        config.getoption("--smoke-audit")
-        or config.getoption("--smoke-audit-output")
-    ):
-        return
-
-    import os
-    import sys
-
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-    try:
-        from smoke_checker import build_audit_summary
-    except ImportError:
-        return
-
-    summary = build_audit_summary()
-    report = summary.format_report()
-
-    if config.getoption("--smoke-audit"):
-        reporter = config.pluginmanager.getplugin("terminalreporter")
-        if reporter is not None:
-            reporter.section("Smoke Test Coverage Audit", sep="=")
-            for line in report.splitlines():
-                reporter.write_line(line)
-        else:
-            print("\n" + report)
-
-    output_path = config.getoption("--smoke-audit-output")
-    if output_path:
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(report + "\n")
