@@ -48,8 +48,8 @@ from folium._audit.smoke import (
 
 PROJECT_ROOT = FOLIUM_ROOT.parent
 
-DIAGNOSTICS_SCHEMA_VERSION = "1.0.0"
-DIAGNOSTICS_SCHEMA_URL = "https://python-visualization.github.io/folium/schemas/diagnostics/v1.json"
+DIAGNOSTICS_SCHEMA_VERSION = "1.1.0"
+DIAGNOSTICS_SCHEMA_URL = "https://python-visualization.github.io/folium/schemas/diagnostics/v1.1.json"
 
 
 OPTIONAL_DEPENDENCIES: dict[str, list[str]] = {
@@ -77,9 +77,24 @@ OPTIONAL_DEPENDENCIES: dict[str, list[str]] = {
 
 @dataclass
 class DiagnosticSection:
-    """A single section of the diagnostic report."""
+    """A single section of the diagnostic report.
+
+    Fields:
+        name: Section identifier (stable across schema versions)
+        status: One of "ok", "warning", "error", "info"
+        available: Whether the data source for this section is available.
+                   False means the section could not be fully collected
+                   (e.g. tests/ directory missing in an installed package).
+        reason: Human-readable reason when available=False
+        data_source: Metadata about where the data came from
+        summary: One-line human-readable summary
+        details: Structured section-specific data
+    """
     name: str
     status: str = "info"
+    available: bool = True
+    reason: str = ""
+    data_source: dict[str, Any] = field(default_factory=dict)
     summary: str = ""
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -87,6 +102,9 @@ class DiagnosticSection:
         return {
             "name": self.name,
             "status": self.status,
+            "available": self.available,
+            "reason": self.reason,
+            "data_source": self.data_source,
             "summary": self.summary,
             "details": self.details,
         }
@@ -142,6 +160,10 @@ def collect_environment() -> DiagnosticSection:
     import folium
 
     section = DiagnosticSection(name="environment", status="info")
+    section.data_source = {
+        "type": "runtime",
+        "always_available": True,
+    }
     section.summary = f"Python {sys.version.split()[0]} on {platform.system()}"
     section.details = {
         "python_version": sys.version,
@@ -163,6 +185,10 @@ def collect_environment() -> DiagnosticSection:
 
 def collect_optional_deps() -> DiagnosticSection:
     section = DiagnosticSection(name="optional_dependencies", status="info")
+    section.data_source = {
+        "type": "python_modules",
+        "always_available": True,
+    }
     available: dict[str, dict[str, Any]] = {}
     missing: list[str] = []
 
@@ -203,6 +229,11 @@ def collect_optional_deps() -> DiagnosticSection:
 
 def collect_resource_policy() -> DiagnosticSection:
     section = DiagnosticSection(name="resource_policy", status="info")
+    section.data_source = {
+        "type": "package_file",
+        "path": str(FOLIUM_ROOT / "resource_manifest.json"),
+        "always_available": True,
+    }
     summary = collect_resource_summary()
 
     map_js = summary["map_defaults"]["js_count"]
@@ -224,6 +255,10 @@ def collect_resource_policy() -> DiagnosticSection:
 
 def collect_cache_info() -> DiagnosticSection:
     section = DiagnosticSection(name="cache_directory", status="info")
+    section.data_source = {
+        "type": "system",
+        "always_available": True,
+    }
 
     temp_dir = tempfile.gettempdir()
     folium_temp_prefix = "folium_"
@@ -268,6 +303,11 @@ def collect_template_filters() -> DiagnosticSection:
     from folium.template import Environment
 
     section = DiagnosticSection(name="template_filters", status="info")
+    section.data_source = {
+        "type": "package_module",
+        "module": "folium.template",
+        "always_available": True,
+    }
 
     env = Environment()
     filters = dict(env.filters)
@@ -294,6 +334,11 @@ def collect_template_filters() -> DiagnosticSection:
 
 def collect_plugin_resource_audit() -> DiagnosticSection:
     section = DiagnosticSection(name="plugin_resource_audit", status="info")
+    section.data_source = {
+        "type": "package_audit",
+        "module": "folium._audit.resources",
+        "always_available": True,
+    }
 
     try:
         result = run_resource_audit(strict=False)
@@ -316,6 +361,11 @@ def collect_plugin_resource_audit() -> DiagnosticSection:
 
 def collect_api_audit() -> DiagnosticSection:
     section = DiagnosticSection(name="api_boundary_audit", status="info")
+    section.data_source = {
+        "type": "package_audit",
+        "module": "folium._audit.api_audit",
+        "always_available": True,
+    }
 
     try:
         result = run_api_audit(strict=False)
@@ -342,20 +392,49 @@ def collect_api_audit() -> DiagnosticSection:
 def collect_test_markers() -> DiagnosticSection:
     section = DiagnosticSection(name="test_markers", status="info")
 
-    try:
-        marker_info = collect_test_marker_summary()
-        section.summary = f"{marker_info['marker_count']} test markers defined"
-        section.details = marker_info
+    marker_info = collect_test_marker_summary()
+    smoke_info = collect_smoke_example_summary()
 
-        smoke_info = collect_smoke_example_summary()
-        section.details["smoke_examples"] = smoke_info
+    markers_available = marker_info.get("available", True)
+    smoke_available = smoke_info.get("available", True)
+    fully_available = markers_available and smoke_available
 
-        if not marker_info.get("marker_count", 0):
-            section.status = "warning"
-    except Exception as e:
-        section.status = "error"
-        section.summary = f"Test marker collection failed: {e}"
-        section.details = {"error": str(e)}
+    section.available = fully_available
+    section.data_source = {
+        "type": "source_repo",
+        "always_available": False,
+        "markers_available": markers_available,
+        "smoke_examples_available": smoke_available,
+        "expected_paths": {
+            **marker_info.get("expected_paths", {}),
+            **smoke_info.get("expected_paths", {}),
+        },
+    }
+
+    if not fully_available:
+        reasons = []
+        if not markers_available:
+            reasons.append(marker_info.get("reason", "test marker data unavailable"))
+        if not smoke_available:
+            reasons.append(smoke_info.get("reason", "smoke example data unavailable"))
+        section.reason = "; ".join(reasons)
+        section.summary = (
+            f"Test markers: source repo data not available "
+            f"({section.reason[:60]}...)" if len(section.reason) > 60 else section.reason
+        )
+        section.status = "info"
+    else:
+        section.summary = f"{marker_info['marker_count']} test markers, {smoke_info['total_count']} smoke examples"
+
+    section.details = {
+        "markers": marker_info,
+        "smoke_examples": smoke_info,
+    }
+
+    if not fully_available:
+        pass
+    elif not marker_info.get("marker_count", 0):
+        section.status = "warning"
 
     return section
 
@@ -443,12 +522,47 @@ def get_json_schema() -> dict[str, Any]:
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["name", "status", "summary", "details"],
+                    "required": ["name", "status", "available", "summary", "details"],
                     "properties": {
                         "name": {"type": "string"},
                         "status": {
                             "type": "string",
                             "enum": ["ok", "warning", "error", "info"],
+                        },
+                        "available": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether the data source for this section is available. "
+                                "False means the section could not be fully collected "
+                                "(e.g. tests/ directory missing in an installed package)."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Human-readable reason when available=False",
+                        },
+                        "data_source": {
+                            "type": "object",
+                            "description": "Metadata about where the section data comes from",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "runtime",
+                                        "python_modules",
+                                        "package_file",
+                                        "package_module",
+                                        "package_audit",
+                                        "system",
+                                        "source_repo",
+                                    ],
+                                },
+                                "always_available": {"type": "boolean"},
+                                "path": {"type": "string"},
+                                "module": {"type": "string"},
+                                "expected_paths": {"type": "object"},
+                            },
+                            "additionalProperties": True,
                         },
                         "summary": {"type": "string"},
                         "details": {"type": "object"},
@@ -476,6 +590,17 @@ def format_human_readable(report: DiagnosticReport) -> str:
 
         lines.append("")
         lines.append(f"  [{status_icon}] {section.name.upper()}")
+
+        if not section.available:
+            lines.append("      ⚠ DATA SOURCE UNAVAILABLE")
+            if section.reason:
+                lines.append(f"      Reason: {section.reason}")
+            data_src = section.data_source
+            if data_src and data_src.get("expected_paths"):
+                lines.append("      Expected paths:")
+                for label, path in data_src["expected_paths"].items():
+                    lines.append(f"        - {label}: {path}")
+
         lines.append(f"      {section.summary}")
         lines.append(f"      {'-' * 50}")
 
@@ -549,15 +674,18 @@ def format_human_readable(report: DiagnosticReport) -> str:
                         lines.append(f"        {mod}: {count} names")
 
         elif section.name == "test_markers":
-            markers = details.get("markers", {})
-            lines.append(f"      Total markers: {details.get('marker_count', 0)}")
-            lines.append(f"      Default (run always): {', '.join(details.get('default_markers', []))}")
-            lines.append(f"      Optional (need flag): {', '.join(details.get('optional_markers', []))}")
-            lines.append(f"      Run all: {details.get('run_all_flag', '')}")
+            marker_info = details.get("markers", {})
+            markers = marker_info.get("markers", {})
+            lines.append(f"      Total markers: {marker_info.get('marker_count', 0)}")
+            lines.append(f"      Default (run always): {', '.join(marker_info.get('default_markers', []))}")
+            lines.append(f"      Optional (need flag): {', '.join(marker_info.get('optional_markers', []))}")
+            lines.append(f"      Run all: {marker_info.get('run_all_flag', '')}")
 
-            for mname, minfo in markers.items():
-                flag = minfo.get("required_flag") or "always"
-                lines.append(f"        - {mname}: {minfo.get('description', '')} [{flag}]")
+            if markers:
+                for mname, minfo in markers.items():
+                    if isinstance(minfo, dict):
+                        flag = minfo.get("required_flag") or "always"
+                        lines.append(f"        - {mname}: {minfo.get('description', '')} [{flag}]")
 
             smoke = details.get("smoke_examples", {})
             if smoke.get("available"):
@@ -565,6 +693,8 @@ def format_human_readable(report: DiagnosticReport) -> str:
                 lines.append(f"        Offline: {smoke.get('offline_count', 0)}")
                 lines.append(f"        Network: {smoke.get('network_count', 0)}")
                 lines.append(f"        Tags: {', '.join(smoke.get('tags', {}).keys())}")
+            elif not section.available:
+                lines.append("      Smoke examples: unavailable (see reason above)")
 
     overall = report._overall_status()
     icon = {"ok": "✓", "warning": "⚠", "error": "✗"}.get(overall, "?")

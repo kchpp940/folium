@@ -14,12 +14,22 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from folium._audit.resources import FOLIUM_ROOT
 
 PROJECT_ROOT = FOLIUM_ROOT.parent
+TESTS_DIR = PROJECT_ROOT / "tests"
+CONFTEST_PATH = TESTS_DIR / "conftest.py"
+SMOKE_CHECKER_PATH = TESTS_DIR / "smoke_checker.py"
+PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
+
+
+def _source_available(path: Path) -> bool:
+    """Check if a source file is available (not missing from installed package)."""
+    return path.exists()
 
 
 TEST_MARKERS: list[dict[str, Any]] = [
@@ -124,37 +134,62 @@ def extract_markers_from_conftest() -> list[dict[str, Any]]:
 
 
 def collect_test_marker_summary() -> dict[str, Any]:
-    """Collect a high-level summary of test markers and policies."""
+    """Collect a high-level summary of test markers and policies.
+
+    Returns a dict with an 'available' top-level key indicating whether
+    the source data (tests/conftest.py) was found. When unavailable,
+    'reason' and 'expected_paths' explain what was missing.
+    """
+    expected_paths = {
+        "conftest": str(CONFTEST_PATH),
+        "pyproject": str(PYPROJECT_PATH),
+        "tests_dir": str(TESTS_DIR),
+    }
+
+    if not _source_available(TESTS_DIR):
+        return {
+            "available": False,
+            "reason": "tests/ directory not found - not running from a source checkout",
+            "expected_paths": expected_paths,
+            "markers": {},
+            "marker_list": TEST_MARKERS,
+            "marker_count": len(TEST_MARKERS),
+            "fallback_used": True,
+        }
+
     markers = extract_markers_from_conftest()
+    fallback_used = False
 
     if not markers:
         markers = TEST_MARKERS
+        fallback_used = True
 
     default_markers = [m for m in markers if m["runs_by_default"]]
     optional_markers = [m for m in markers if not m["runs_by_default"]]
 
     marker_map = {m["name"]: m for m in markers}
 
-    conftest_path = PROJECT_ROOT / "tests" / "conftest.py"
-    pyproject_path = PROJECT_ROOT / "pyproject.toml"
-
     pytest_config: dict[str, Any] = {}
-    if pyproject_path.exists():
+    if PYPROJECT_PATH.exists():
         try:
             import tomllib
-            with open(pyproject_path, "rb") as f:
+            with open(PYPROJECT_PATH, "rb") as f:
                 config = tomllib.load(f)
             pytest_config = config.get("tool", {}).get("pytest", {}).get("ini_options", {})
         except (ImportError, Exception):
             pytest_config = {}
 
     return {
+        "available": True,
+        "reason": "",
+        "expected_paths": expected_paths,
+        "fallback_used": fallback_used,
         "markers": marker_map,
         "marker_list": markers,
         "marker_count": len(markers),
         "default_markers": [m["name"] for m in default_markers],
         "optional_markers": [m["name"] for m in optional_markers],
-        "conftest_path": str(conftest_path) if conftest_path.exists() else None,
+        "conftest_path": str(CONFTEST_PATH) if CONFTEST_PATH.exists() else None,
         "pytest_config": pytest_config,
         "run_all_flag": "--run-all",
         "flag_to_marker": {
@@ -166,17 +201,44 @@ def collect_test_marker_summary() -> dict[str, Any]:
 
 
 def collect_smoke_example_summary() -> dict[str, Any]:
-    """Collect summary info about smoke test examples."""
-    tests_dir = PROJECT_ROOT / "tests"
+    """Collect summary info about smoke test examples.
+
+    Returns a dict with an 'available' top-level key indicating whether
+    the smoke checker module is importable. When unavailable,
+    'reason' and 'expected_paths' explain what was missing.
+    """
+    expected_paths = {
+        "smoke_checker": str(SMOKE_CHECKER_PATH),
+        "tests_dir": str(TESTS_DIR),
+    }
+
+    if not _source_available(SMOKE_CHECKER_PATH):
+        return {
+            "available": False,
+            "reason": (
+                "tests/smoke_checker.py not found - smoke example registry "
+                "only available when running from a source checkout"
+            ),
+            "expected_paths": expected_paths,
+            "total_count": 0,
+            "offline_count": 0,
+            "network_count": 0,
+            "examples": [],
+        }
 
     try:
         import sys
-        sys.path.insert(0, str(tests_dir))
+        sys.path.insert(0, str(TESTS_DIR))
         from smoke_checker import build_example_registry, filter_examples
-    except Exception:
+    except Exception as e:
         return {
             "available": False,
-            "error": "smoke_checker module not available",
+            "reason": f"Failed to import smoke_checker: {e}",
+            "expected_paths": expected_paths,
+            "total_count": 0,
+            "offline_count": 0,
+            "network_count": 0,
+            "examples": [],
         }
 
     registry = build_example_registry()
@@ -208,6 +270,8 @@ def collect_smoke_example_summary() -> dict[str, Any]:
 
     return {
         "available": True,
+        "reason": "",
+        "expected_paths": expected_paths,
         "total_count": len(registry),
         "offline_count": len(offline),
         "network_count": len(network_only),

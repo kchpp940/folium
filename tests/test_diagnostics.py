@@ -81,12 +81,19 @@ class TestSchemaStability:
         data = report.to_dict()
 
         section = data["sections"][0]
-        required_section = {"name", "status", "summary", "details"}
+        required_section = {
+            "name", "status", "available", "reason",
+            "data_source", "summary", "details",
+        }
         for key in required_section:
             assert key in section, f"Missing section field: {key}"
 
         assert section["name"] == "environment"
         assert section["status"] in {"ok", "warning", "error", "info"}
+        assert isinstance(section["available"], bool)
+        assert section["available"] is True
+        assert isinstance(section["reason"], str)
+        assert isinstance(section["data_source"], dict)
         assert isinstance(section["summary"], str)
         assert isinstance(section["details"], dict)
 
@@ -270,6 +277,147 @@ class TestDiagnosticsRunner:
         output = format_human_readable(report)
         assert isinstance(output, str)
         assert len(output) > 0
+
+
+class TestDataSourceAvailability:
+    """Test data source availability detection and reporting.
+
+    Sections that depend on the source repo (test_markers, smoke) should
+    gracefully report available=False with reason and expected_paths
+    when their data sources are missing.
+    """
+
+    def test_always_available_sections_have_data_source(self):
+        always_available = {
+            "environment",
+            "optional_dependencies",
+            "resource_policy",
+            "cache_directory",
+            "template_filters",
+            "plugin_resource_audit",
+            "api_boundary_audit",
+        }
+        report = run_diagnostics(sections=list(always_available))
+        for section in report.sections:
+            data = section.to_dict()
+            assert data["available"] is True, f"{section.name} should be available"
+            assert "data_source" in data
+            assert data["data_source"].get("always_available") is True
+
+    def test_test_markers_has_expected_paths(self):
+        report = run_diagnostics(sections=["test_markers"])
+        section = report.sections[0].to_dict()
+
+        assert "data_source" in section
+        ds = section["data_source"]
+        assert "expected_paths" in ds
+        assert "tests_dir" in ds["expected_paths"]
+        assert "conftest" in ds["expected_paths"]
+
+    def test_unavailable_data_source_simulation(self, monkeypatch):
+        from folium._audit import diagnostics as diag_mod
+
+        def fake_marker_summary():
+            return {
+                "available": False,
+                "reason": "Simulated: tests/ not found",
+                "expected_paths": {
+                    "tests_dir": "/fake/path/tests",
+                    "conftest": "/fake/path/tests/conftest.py",
+                },
+                "marker_count": 0,
+                "markers": {},
+                "marker_list": [],
+                "fallback_used": True,
+            }
+
+        def fake_smoke_summary():
+            return {
+                "available": False,
+                "reason": "Simulated: smoke_checker not found",
+                "expected_paths": {
+                    "smoke_checker": "/fake/path/tests/smoke_checker.py",
+                },
+                "total_count": 0,
+                "examples": [],
+            }
+
+        monkeypatch.setattr(diag_mod, "collect_test_marker_summary", fake_marker_summary)
+        monkeypatch.setattr(diag_mod, "collect_smoke_example_summary", fake_smoke_summary)
+
+        report = run_diagnostics(sections=["test_markers"])
+        section = report.sections[0].to_dict()
+
+        assert section["available"] is False
+        assert section["reason"] != ""
+        assert "Simulated" in section["reason"]
+        assert "expected_paths" in section["data_source"]
+        assert section["data_source"]["markers_available"] is False
+        assert section["data_source"]["smoke_examples_available"] is False
+
+    def test_available_sections_do_not_have_reason(self):
+        report = run_diagnostics(sections=["environment"])
+        section = report.sections[0].to_dict()
+        assert section["available"] is True
+        assert section["reason"] == ""
+
+    def test_data_source_type_classification(self):
+        type_map = {
+            "environment": "runtime",
+            "optional_dependencies": "python_modules",
+            "resource_policy": "package_file",
+            "cache_directory": "system",
+            "template_filters": "package_module",
+            "plugin_resource_audit": "package_audit",
+            "api_boundary_audit": "package_audit",
+            "test_markers": "source_repo",
+        }
+        report = run_diagnostics()
+        for section in report.sections:
+            data = section.to_dict()
+            ds_type = data["data_source"].get("type")
+            assert ds_type == type_map.get(section.name), (
+                f"Section {section.name} has wrong data_source.type: {ds_type}"
+            )
+
+    def test_json_schema_includes_availability_fields(self):
+        schema = get_json_schema()
+        section_schema = schema["properties"]["sections"]["items"]
+        props = section_schema["properties"]
+
+        assert "available" in props
+        assert props["available"]["type"] == "boolean"
+
+        assert "reason" in props
+        assert props["reason"]["type"] == "string"
+
+        assert "data_source" in props
+        assert props["data_source"]["type"] == "object"
+
+        required = section_schema.get("required", [])
+        assert "available" in required, "available must be a required section field"
+
+    def test_human_readable_shows_unavailable_warning(self):
+        from folium._audit.diagnostics import DiagnosticSection
+
+        section = DiagnosticSection(
+            name="test_section",
+            status="info",
+            available=False,
+            reason="Data source not found",
+            data_source={
+                "expected_paths": {"foo": "/fake/foo"},
+            },
+            summary="test summary",
+            details={},
+        )
+        report = DiagnosticReport()
+        report.add_section(section)
+
+        output = format_human_readable(report)
+        assert "DATA SOURCE UNAVAILABLE" in output
+        assert "Data source not found" in output
+        assert "Expected paths" in output
 
 
 class TestCLIEntryPoint:
