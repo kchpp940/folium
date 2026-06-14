@@ -17,7 +17,6 @@ Usage:
 from __future__ import annotations
 
 import sys
-from typing import Any
 
 from folium._audit.api_audit import (
     AUDITED_MODULES,
@@ -27,27 +26,29 @@ from folium._audit.api_audit import (
     check_init_all_superset,
     check_internal_not_in_all,
     check_no_extra_public_names,
+    check_top_level_modules,
+    collect_api_summary,
     run_api_audit,
 )
 from folium._audit.resources import (
+    CDN_PATTERN,
+    FOLIUM_ROOT,
+    PACKAGE_VERSION_PATTERN,
     AuditFinding,
     AuditResult,
-    CDN_PATTERN,
+    _collect_resources_from_class,
+    _extract_package_from_url,
+    _extract_version_from_url,
+    _get_feature_classes,
+    _get_plugin_classes,
     check_docs_consistency,
     check_duplicate_names,
     check_features_dynamic_urls,
     check_inline_cdn_urls,
     check_manifest_consistency,
     check_version_drift,
-    FOLIUM_ROOT,
     load_manifest,
-    PACKAGE_VERSION_PATTERN,
     run_audit,
-    _collect_resources_from_class,
-    _extract_package_from_url,
-    _extract_version_from_url,
-    _get_feature_classes,
-    _get_plugin_classes,
 )
 
 __all__ = [
@@ -68,7 +69,9 @@ __all__ = [
     "check_internal_not_in_all",
     "check_manifest_consistency",
     "check_no_extra_public_names",
+    "check_top_level_modules",
     "check_version_drift",
+    "collect_api_summary",
     "load_manifest",
     "run_api_audit",
     "run_audit",

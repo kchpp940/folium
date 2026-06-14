@@ -8,16 +8,18 @@ Validates that the public API export boundaries are correctly defined:
   - Internal implementation names must not appear in __all__
   - folium.__init__.__all__ covers all public names from submodules
   - __all__ lists contain no duplicates and are sorted
+  - Top-level non-underscore modules are either core API or thin shims
 
 This is an INTERNAL module. Do NOT import from public API.
 """
 
 from __future__ import annotations
 
+import ast
 import importlib
 from typing import Any
 
-from folium._audit.resources import AuditResult
+from folium._audit.resources import FOLIUM_ROOT, AuditResult
 
 AUDITED_MODULES = {
     "folium": "folium",
@@ -30,6 +32,36 @@ AUDITED_MODULES = {
     "folium.utilities": "folium.utilities",
     "folium.plugins": "folium.plugins",
 }
+
+_TOP_LEVEL_CORE_MODULES = {
+    "__init__",
+    "__version__",
+    "elements",
+    "features",
+    "folium",
+    "map",
+    "raster_layers",
+    "template",
+    "utilities",
+    "vector_layers",
+}
+
+_TOP_LEVEL_STRICT_SHIMS = {
+    "diagnostics",
+}
+
+_TOP_LEVEL_LEGACY_SHIMS = {
+    "release_audit",
+}
+
+_TOP_LEVEL_SHIM_MODULES = _TOP_LEVEL_STRICT_SHIMS | _TOP_LEVEL_LEGACY_SHIMS
+
+_TOP_LEVEL_INTERNAL_PACKAGES = {
+    "_audit",
+    "plugins",
+}
+
+_TOP_LEVEL_ALLOWED = _TOP_LEVEL_CORE_MODULES | _TOP_LEVEL_SHIM_MODULES | _TOP_LEVEL_INTERNAL_PACKAGES
 
 _NAMES_ALLOWED_IN_MODULE_NS_WITHOUT_ALL = {
     "__name__",
@@ -164,6 +196,146 @@ def check_all_sorted_and_unique(result: AuditResult):
             )
 
 
+def check_top_level_modules(result: AuditResult):
+    """Check that top-level modules are either core API, known shims, or internal packages.
+
+    Policy:
+      - Core modules: map.py, features.py, etc. (part of the public API surface)
+      - Strict shims: diagnostics.py (thin wrappers, __all__=[], only CLI entry)
+      - Legacy shims: release_audit.py (backward-compat re-exports from _audit)
+      - Internal packages: _audit/, plugins/ (underscore or well-known)
+      - Files starting with _ are internal and skipped automatically
+      - Directories without __init__.py are resource dirs and skipped
+      - New top-level engineering tools must live under _audit/ and use a shim
+    """
+    top_level: set[str] = set()
+    for item in FOLIUM_ROOT.iterdir():
+        if item.name.startswith("_") and item.name not in ("__init__.py", "__version__"):
+            continue
+        if item.is_file() and item.suffix == ".py":
+            top_level.add(item.stem)
+        elif item.is_dir() and (item / "__init__.py").exists():
+            top_level.add(item.name)
+
+    unknown = top_level - _TOP_LEVEL_ALLOWED
+    if unknown:
+        for name in sorted(unknown):
+            result.add_error(
+                "unknown_top_level_module",
+                f"New top-level module/package '{name}' is not in the allowed list",
+                location=f"folium/{name}",
+                detail=(
+                    "New engineering tools should live under folium._audit/ "
+                    "and use a thin shim at the top level with __all__=[]"
+                ),
+            )
+
+    for shim_name in sorted(_TOP_LEVEL_STRICT_SHIMS):
+        shim_path = FOLIUM_ROOT / f"{shim_name}.py"
+        if not shim_path.exists():
+            result.add_error(
+                "strict_shim_missing",
+                f"Expected strict shim module folium.{shim_name} is missing",
+                location=f"folium/{shim_name}.py",
+            )
+            continue
+
+        try:
+            source = shim_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(shim_path))
+        except SyntaxError as e:
+            result.add_error(
+                "shim_syntax_error",
+                f"Shim module folium.{shim_name} has syntax errors",
+                location=f"folium/{shim_name}.py",
+                detail=str(e),
+            )
+            continue
+
+        has_all_empty = False
+        reexports_internal = False
+        has_main = False
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "__all__":
+                        if isinstance(node.value, (ast.List, ast.Tuple)) and len(node.value.elts) == 0:
+                            has_all_empty = True
+
+            if isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.target.id == "__all__":
+                    if node.value is not None:
+                        if isinstance(node.value, (ast.List, ast.Tuple)) and len(node.value.elts) == 0:
+                            has_all_empty = True
+
+            if isinstance(node, ast.FunctionDef):
+                if node.name == "main":
+                    has_main = True
+
+            if isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith("folium._audit"):
+                    reexports_internal = True
+
+        if not has_all_empty:
+            result.add_error(
+                "strict_shim_all_not_empty",
+                f"Strict shim folium.{shim_name} must have __all__ = []",
+                location=f"folium/{shim_name}.py",
+                detail=(
+                    "Strict shim modules must not expose any public API symbols. "
+                    "Set __all__ = [] to enforce the boundary so that "
+                    "from folium.diagnostics import * imports nothing."
+                ),
+            )
+
+        if not reexports_internal:
+            result.add_warning(
+                "shim_no_internal_reexport",
+                f"Shim module folium.{shim_name} does not re-export from _audit/*",
+                location=f"folium/{shim_name}.py",
+                detail="Shims should forward to implementations under folium._audit/",
+            )
+
+        if not has_main:
+            result.add_warning(
+                "strict_shim_no_main",
+                f"Strict shim folium.{shim_name} should have a main() for -m invocation",
+                location=f"folium/{shim_name}.py",
+            )
+
+    for shim_name in sorted(_TOP_LEVEL_LEGACY_SHIMS):
+        shim_path = FOLIUM_ROOT / f"{shim_name}.py"
+        if not shim_path.exists():
+            result.add_warning(
+                "legacy_shim_missing",
+                f"Legacy shim module folium.{shim_name} is missing",
+                location=f"folium/{shim_name}.py",
+            )
+            continue
+
+        try:
+            source = shim_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(shim_path))
+        except SyntaxError:
+            continue
+
+        reexports_internal = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith("folium._audit"):
+                    reexports_internal = True
+                    break
+
+        if not reexports_internal:
+            result.add_warning(
+                "legacy_shim_no_internal_reexport",
+                f"Legacy shim folium.{shim_name} does not re-export from _audit/*",
+                location=f"folium/{shim_name}.py",
+                detail="Legacy shims should forward to implementations under folium._audit/",
+            )
+
+
 def run_api_audit(strict: bool = False) -> AuditResult:
     result = AuditResult()
 
@@ -173,6 +345,7 @@ def run_api_audit(strict: bool = False) -> AuditResult:
     check_init_all_superset(result)
     check_internal_not_in_all(result)
     check_all_sorted_and_unique(result)
+    check_top_level_modules(result)
 
     if strict:
         for w in result.warnings:
@@ -205,4 +378,7 @@ def collect_api_summary() -> dict[str, Any]:
         "folium_init_all_count": len(init_all),
         "folium_init_all": init_all,
         "total_public_api_names": len(init_all),
+        "top_level_core_modules": sorted(_TOP_LEVEL_CORE_MODULES),
+        "top_level_shim_modules": sorted(_TOP_LEVEL_SHIM_MODULES),
+        "top_level_internal_packages": sorted(_TOP_LEVEL_INTERNAL_PACKAGES),
     }

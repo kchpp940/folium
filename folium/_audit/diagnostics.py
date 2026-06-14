@@ -376,21 +376,27 @@ def run_diagnostics(sections: list[str] | None = None) -> DiagnosticReport:
     """Run the full diagnostic suite and return a structured report."""
     if sections is None:
         sections = list(SECTION_COLLECTORS.keys())
+    else:
+        unknown = [s for s in sections if s not in SECTION_COLLECTORS]
+        if unknown:
+            raise ValueError(
+                f"Unknown diagnostic sections: {', '.join(unknown)}. "
+                f"Available: {', '.join(SECTION_COLLECTORS.keys())}"
+            )
 
     report = DiagnosticReport()
     for section_name in sections:
-        collector = SECTION_COLLECTORS.get(section_name)
-        if collector:
-            try:
-                section = collector()
-                report.add_section(section)
-            except Exception as e:
-                report.add_section(DiagnosticSection(
-                    name=section_name,
-                    status="error",
-                    summary=f"Collection failed: {e}",
-                    details={"error": str(e)},
-                ))
+        collector = SECTION_COLLECTORS[section_name]
+        try:
+            section = collector()
+            report.add_section(section)
+        except Exception as e:
+            report.add_section(DiagnosticSection(
+                name=section_name,
+                status="error",
+                summary=f"Collection failed: {e}",
+                details={"error": str(e)},
+            ))
 
     return report
 
